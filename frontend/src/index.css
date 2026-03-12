@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Ensure xterm.js fills its container */
+.xterm {
+  height: 100%;
+  width: 100%;
+  padding: 4px;
+}
+
 @theme {
   --color-primary: #3b82f6;
   --color-primary-dark: #2563eb;

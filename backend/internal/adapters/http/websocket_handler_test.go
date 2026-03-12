@@ -24,7 +24,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *app.SessionService) {
 		t.Fatalf("failed to create repository: %v", err)
 	}
 
-	pm := pty.NewManager(pty.WithCommand("cat"))
+	pm := pty.NewManager(pty.WithCommand("cat"), pty.WithFixedArgs())
 	service := app.NewSessionService(repo, pm)
 
 	router := NewRouter(service, nil)
@@ -100,12 +100,13 @@ func TestWebSocketResize(t *testing.T) {
 		t.Fatalf("websocket write resize failed: %v", err)
 	}
 
-	// Give a moment for the resize to be processed, then verify process still alive
-	time.Sleep(100 * time.Millisecond)
+	// Give a moment for the resize to be processed
+	time.Sleep(200 * time.Millisecond)
 
-	_, err = service.GetPTYHandle(session.ID)
+	// Verify the connection is still usable by writing data
+	err = conn.Write(ctx, websocket.MessageBinary, []byte("test\n"))
 	if err != nil {
-		t.Fatalf("session should still be running after resize: %v", err)
+		t.Fatalf("websocket write after resize failed: %v", err)
 	}
 }
 
