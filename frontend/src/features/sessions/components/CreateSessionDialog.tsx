@@ -9,23 +9,27 @@ export function CreateSessionDialog() {
   const [directory, setDirectory] = useState("");
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const createSession = useCreateSession();
-  const openTab = useSessionsStore((s) => s.openTab);
+  const setActiveSession = useSessionsStore((s) => s.setActiveSession);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !directory.trim()) return;
+    if (!directory.trim()) return;
 
-    createSession.mutate(
-      { name: name.trim(), working_dir: directory.trim() },
-      {
-        onSuccess: (session) => {
-          openTab(session.id, session.name);
-          setName("");
-          setDirectory("");
-          setIsOpen(false);
-        },
+    const input: { name?: string; working_dir: string } = {
+      working_dir: directory.trim(),
+    };
+    if (name.trim()) {
+      input.name = name.trim();
+    }
+
+    createSession.mutate(input, {
+      onSuccess: (session) => {
+        setActiveSession(session.id);
+        setName("");
+        setDirectory("");
+        setIsOpen(false);
       },
-    );
+    });
   }
 
   if (!isOpen) {
@@ -64,14 +68,14 @@ export function CreateSessionDialog() {
             htmlFor="session-name"
             className="mb-1 block text-xs font-medium text-gray-400"
           >
-            Name
+            Name <span className="text-gray-500">(optional)</span>
           </label>
           <input
             id="session-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="my-session"
+            placeholder="defaults to directory name"
             className="w-full rounded border border-gray-600 bg-gray-900 px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-green-500 focus:outline-none"
           />
         </div>
@@ -104,7 +108,7 @@ export function CreateSessionDialog() {
         <div className="flex gap-2">
           <button
             type="submit"
-            disabled={createSession.isPending}
+            disabled={createSession.isPending || !directory.trim()}
             className="flex-1 rounded bg-green-600 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-500 disabled:opacity-50"
           >
             {createSession.isPending ? "Creating..." : "Create"}

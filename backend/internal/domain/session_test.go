@@ -29,10 +29,13 @@ func TestNewSession_Valid(t *testing.T) {
 	}
 }
 
-func TestNewSession_EmptyName(t *testing.T) {
-	_, err := NewSession("", "/tmp")
-	if err == nil {
-		t.Fatal("expected error for empty name")
+func TestNewSession_EmptyName_DefaultsToDirectoryBasename(t *testing.T) {
+	s, err := NewSession("", "/home/user/my-project")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if s.Name != "my-project" {
+		t.Errorf("expected name 'my-project', got %q", s.Name)
 	}
 }
 

@@ -69,7 +69,7 @@ func newMockPM() *mockPM {
 	}
 }
 
-func (m *mockPM) Spawn(ctx context.Context, workingDir string) (*ports.PTYHandle, error) {
+func (m *mockPM) Spawn(ctx context.Context, workingDir string, args ...string) (*ports.PTYHandle, error) {
 	done := make(chan error, 1)
 	h := &ports.PTYHandle{PTY: os.Stdin, PID: 42, Done: done}
 	m.alive[42] = true
@@ -82,6 +82,7 @@ func (m *mockPM) Kill(pid int) error {
 	delete(m.alive, pid)
 	return nil
 }
+func (m *mockPM) KillAll()                                   {}
 func (m *mockPM) IsAlive(pid int) bool                       { return m.alive[pid] }
 func (m *mockPM) GetHandle(pid int) (*ports.PTYHandle, bool) { h, ok := m.handles[pid]; return h, ok }
 
@@ -131,7 +132,7 @@ func TestSessionHandler_Create_InvalidBody(t *testing.T) {
 	}
 }
 
-func TestSessionHandler_Create_EmptyName(t *testing.T) {
+func TestSessionHandler_Create_EmptyNameDefaultsToDir(t *testing.T) {
 	handler, _ := setupHandler()
 
 	body, _ := json.Marshal(createSessionRequest{Name: "", WorkingDir: "/tmp"})
@@ -140,8 +141,14 @@ func TestSessionHandler_Create_EmptyName(t *testing.T) {
 
 	handler.Create(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected status 500, got %d", w.Code)
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected status 201, got %d", w.Code)
+	}
+
+	var resp sessionResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Name != "tmp" {
+		t.Errorf("expected name 'tmp', got %q", resp.Name)
 	}
 }
 

@@ -71,7 +71,7 @@ func newMockProcessManager() *mockProcessManager {
 	}
 }
 
-func (m *mockProcessManager) Spawn(ctx context.Context, workingDir string) (*ports.PTYHandle, error) {
+func (m *mockProcessManager) Spawn(ctx context.Context, workingDir string, args ...string) (*ports.PTYHandle, error) {
 	if m.spawnErr != nil {
 		return nil, m.spawnErr
 	}
@@ -99,6 +99,8 @@ func (m *mockProcessManager) Kill(pid int) error {
 func (m *mockProcessManager) IsAlive(pid int) bool {
 	return m.alive[pid]
 }
+
+func (m *mockProcessManager) KillAll() {}
 
 func (m *mockProcessManager) GetHandle(pid int) (*ports.PTYHandle, bool) {
 	h, ok := m.handles[pid]
@@ -131,14 +133,28 @@ func TestCreateSession_Success(t *testing.T) {
 	}
 }
 
-func TestCreateSession_InvalidInput(t *testing.T) {
+func TestCreateSession_EmptyNameDefaultsToDir(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm)
 
-	_, err := svc.CreateSession(context.Background(), "", "/tmp")
+	session, err := svc.CreateSession(context.Background(), "", "/home/user/my-project")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if session.Name != "my-project" {
+		t.Errorf("expected name 'my-project', got %q", session.Name)
+	}
+}
+
+func TestCreateSession_EmptyWorkingDir(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm)
+
+	_, err := svc.CreateSession(context.Background(), "test", "")
 	if err == nil {
-		t.Fatal("expected error for empty name")
+		t.Fatal("expected error for empty working dir")
 	}
 }
 
