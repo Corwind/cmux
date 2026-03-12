@@ -87,7 +87,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
 
       // Handle CSI > flags u — kitty protocol push (Claude Code enables the protocol)
       currentTerm.parser.registerCsiHandler({ prefix: ">", final: "u" }, (params) => {
-        kittyModeFlags = params.params[0] ?? 1;
+        kittyModeFlags = (params[0] as number) ?? 1;
         return false;
       });
 
