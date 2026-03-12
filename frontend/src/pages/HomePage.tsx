@@ -1,6 +1,6 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SessionList, CreateSessionDialog, useSessionsStore } from "@/features/sessions";
-import { Terminal, SessionTabs } from "@/features/terminal";
+import { Terminal } from "@/features/terminal";
 
 export function HomePage() {
   const activeSessionId = useSessionsStore((s) => s.activeSessionId);
@@ -15,7 +15,6 @@ export function HomePage() {
           </div>
         </>
       }
-      tabs={<SessionTabs />}
     >
       {activeSessionId ? (
         <Terminal key={activeSessionId} sessionId={activeSessionId} />

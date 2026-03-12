@@ -1,13 +1,15 @@
 import { cn } from "@/lib/cn";
 import { useSessions } from "../hooks/useSessions";
 import { useDeleteSession } from "../hooks/useDeleteSession";
+import { useResumeSession } from "../hooks/useResumeSession";
 import { useSessionsStore } from "../stores/sessions.store";
 import { StatusBadge } from "./StatusBadge";
 
 export function SessionList() {
   const { data: sessions, isLoading } = useSessions();
   const deleteSession = useDeleteSession();
-  const { activeSessionId, openTab } = useSessionsStore();
+  const resumeSession = useResumeSession();
+  const { activeSessionId, setActiveSession } = useSessionsStore();
 
   if (isLoading) {
     return (
@@ -29,7 +31,7 @@ export function SessionList() {
         <li key={session.id}>
           <button
             type="button"
-            onClick={() => openTab(session.id, session.name)}
+            onClick={() => setActiveSession(session.id)}
             className={cn(
               "flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors",
               activeSessionId === session.id
@@ -45,6 +47,33 @@ export function SessionList() {
             </div>
             <div className="ml-2 flex items-center gap-2">
               <StatusBadge status={session.status} />
+              {session.status === "stopped" && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    resumeSession.mutate(session.id, {
+                      onSuccess: () => setActiveSession(session.id),
+                    });
+                  }}
+                  className="rounded p-0.5 text-gray-500 hover:bg-gray-600 hover:text-green-400"
+                  title="Resume session"
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M5 3l14 9-14 9V3z"
+                    />
+                  </svg>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={(e) => {
