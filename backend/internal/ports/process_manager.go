@@ -12,9 +12,10 @@ type PTYHandle struct {
 }
 
 type ProcessManager interface {
-	Spawn(ctx context.Context, workingDir string) (*PTYHandle, error)
+	Spawn(ctx context.Context, workingDir string, args ...string) (*PTYHandle, error)
 	Resize(pid int, rows, cols uint16) error
 	Kill(pid int) error
+	KillAll()
 	IsAlive(pid int) bool
 	GetHandle(pid int) (*PTYHandle, bool)
 }

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.corwind.cmux</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/cmux</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CMUX_DB_PATH</key>
+        <string>__HOME__/.cmux/cmux.db</string>
+        <key>CMUX_PORT</key>
+        <string>3001</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.cmux/cmux.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.cmux/cmux.log</string>
+</dict>
+</plist>

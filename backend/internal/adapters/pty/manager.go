@@ -3,6 +3,7 @@ package pty
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -24,10 +25,17 @@ func WithCommand(command string) Option {
 	}
 }
 
+func WithFixedArgs(args ...string) Option {
+	return func(m *Manager) {
+		m.fixedArgs = args
+	}
+}
+
 type Manager struct {
 	mu        sync.RWMutex
 	processes map[int]*managedProcess
 	command   string
+	fixedArgs []string
 }
 
 func NewManager(opts ...Option) *Manager {
@@ -41,9 +49,15 @@ func NewManager(opts ...Option) *Manager {
 	return m
 }
 
-func (m *Manager) Spawn(ctx context.Context, workingDir string) (*ports.PTYHandle, error) {
-	cmd := exec.CommandContext(ctx, m.command)
+func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*ports.PTYHandle, error) {
+	spawnArgs := args
+	if m.fixedArgs != nil {
+		spawnArgs = m.fixedArgs
+	}
+	cmd := exec.Command(m.command, spawnArgs...)
 	cmd.Dir = workingDir
+	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
+	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 
 	ptmx, err := ptylib.Start(cmd)
 	if err != nil {
@@ -66,6 +80,17 @@ func (m *Manager) Spawn(ctx context.Context, workingDir string) (*ports.PTYHandl
 	m.mu.Unlock()
 
 	return handle, nil
+}
+
+func filterEnv(env []string, exclude string) []string {
+	prefix := exclude + "="
+	var filtered []string
+	for _, e := range env {
+		if len(e) < len(prefix) || e[:len(prefix)] != prefix {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }
 
 func (m *Manager) Resize(pid int, rows, cols uint16) error {
@@ -97,6 +122,21 @@ func (m *Manager) Kill(pid int) error {
 
 	proc.handle.PTY.Close()
 	return proc.cmd.Process.Signal(syscall.SIGTERM)
+}
+
+func (m *Manager) KillAll() {
+	m.mu.Lock()
+	procs := make([]*managedProcess, 0, len(m.processes))
+	for _, p := range m.processes {
+		procs = append(procs, p)
+	}
+	m.processes = make(map[int]*managedProcess)
+	m.mu.Unlock()
+
+	for _, p := range procs {
+		p.handle.PTY.Close()
+		_ = p.cmd.Process.Signal(syscall.SIGTERM)
+	}
 }
 
 func (m *Manager) IsAlive(pid int) bool {
