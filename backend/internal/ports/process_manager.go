@@ -1,0 +1,20 @@
+package ports
+
+import (
+	"context"
+	"os"
+)
+
+type PTYHandle struct {
+	PTY  *os.File
+	PID  int
+	Done <-chan error
+}
+
+type ProcessManager interface {
+	Spawn(ctx context.Context, workingDir string) (*PTYHandle, error)
+	Resize(pid int, rows, cols uint16) error
+	Kill(pid int) error
+	IsAlive(pid int) bool
+	GetHandle(pid int) (*PTYHandle, bool)
+}
