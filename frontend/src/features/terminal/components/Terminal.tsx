@@ -95,6 +95,18 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         }
       };
 
+      // Intercept Shift+Enter to send kitty keyboard protocol escape sequence
+      // so Claude Code treats it as newline (multi-line input) instead of submit.
+      currentTerm.attachCustomKeyEventHandler((event) => {
+        if (event.type === "keydown" && event.key === "Enter" && event.shiftKey) {
+          if (currentWs.readyState === WebSocket.OPEN) {
+            currentWs.send(encoder.encode("\x1b[13;2u"));
+          }
+          return false; // prevent xterm from also sending \r
+        }
+        return true;
+      });
+
       const encoder = new TextEncoder();
       currentTerm.onData((data) => {
         if (currentWs.readyState === WebSocket.OPEN) {
