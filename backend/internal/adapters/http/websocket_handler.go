@@ -12,7 +12,7 @@ import (
 	"github.com/Corwind/cmux/backend/internal/app"
 	"github.com/Corwind/cmux/backend/internal/ports"
 	"github.com/go-chi/chi/v5"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // ptyBridge manages a single PTY reader goroutine per session
@@ -35,16 +35,30 @@ func (b *ptyBridge) getConn() *websocket.Conn {
 }
 
 type WebSocketHandler struct {
-	service *app.SessionService
-	mu      sync.Mutex
-	bridges map[string]*ptyBridge
+	service        *app.SessionService
+	mu             sync.Mutex
+	bridges        map[string]*ptyBridge
+	originPatterns []string
 }
 
-func NewWebSocketHandler(service *app.SessionService) *WebSocketHandler {
-	return &WebSocketHandler{
-		service: service,
-		bridges: make(map[string]*ptyBridge),
+type WebSocketOption func(*WebSocketHandler)
+
+func WithOriginPatterns(patterns []string) WebSocketOption {
+	return func(h *WebSocketHandler) {
+		h.originPatterns = patterns
 	}
+}
+
+func NewWebSocketHandler(service *app.SessionService, opts ...WebSocketOption) *WebSocketHandler {
+	h := &WebSocketHandler{
+		service:        service,
+		bridges:        make(map[string]*ptyBridge),
+		originPatterns: []string{"localhost:5173", "localhost:3001"},
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 type resizeMessage struct {
@@ -75,8 +89,8 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 					log.Printf("PTY read error for session %s: %v", sessionID, err)
 				}
 				if conn := bridge.getConn(); conn != nil {
-					conn.Write(context.Background(), websocket.MessageText, []byte(`{"type":"status","status":"stopped"}`))
-					conn.Close(websocket.StatusNormalClosure, "process exited")
+					_ = conn.Write(context.Background(), websocket.MessageText, []byte(`{"type":"status","status":"stopped"}`))
+					_ = conn.Close(websocket.StatusNormalClosure, "process exited")
 				}
 				h.mu.Lock()
 				delete(h.bridges, sessionID)
@@ -107,14 +121,14 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns:  []string{"localhost:5173"},
+		OriginPatterns:  h.originPatterns,
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
 		log.Printf("websocket accept error: %v", err)
 		return
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	conn.SetReadLimit(128 * 1024) // 128KB read limit
 

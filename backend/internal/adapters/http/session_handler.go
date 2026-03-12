@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/Corwind/cmux/backend/internal/app"
@@ -46,7 +47,7 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(sessionResponse{
+	if err := json.NewEncoder(w).Encode(sessionResponse{
 		ID:         session.ID,
 		Name:       session.Name,
 		WorkingDir: session.WorkingDir,
@@ -54,7 +55,9 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		PID:        session.PID,
 		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:  session.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-	})
+	}); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
 }
 
 func (h *SessionHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +81,9 @@ func (h *SessionHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
 }
 
 func (h *SessionHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +95,7 @@ func (h *SessionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sessionResponse{
+	if err := json.NewEncoder(w).Encode(sessionResponse{
 		ID:         session.ID,
 		Name:       session.Name,
 		WorkingDir: session.WorkingDir,
@@ -98,7 +103,9 @@ func (h *SessionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		PID:        session.PID,
 		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:  session.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-	})
+	}); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
 }
 
 func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +117,7 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sessionResponse{
+	if err := json.NewEncoder(w).Encode(sessionResponse{
 		ID:         session.ID,
 		Name:       session.Name,
 		WorkingDir: session.WorkingDir,
@@ -118,7 +125,9 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		PID:        session.PID,
 		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:  session.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-	})
+	}); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
 }
 
 func (h *SessionHandler) Delete(w http.ResponseWriter, r *http.Request) {

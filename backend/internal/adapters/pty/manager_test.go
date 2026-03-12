@@ -19,7 +19,7 @@ func TestSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
-	defer m.Kill(handle.PID)
+	defer func() { _ = m.Kill(handle.PID) }()
 
 	if handle.PID <= 0 {
 		t.Fatalf("expected positive PID, got %d", handle.PID)
@@ -40,7 +40,7 @@ func TestGetHandle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
-	defer m.Kill(handle.PID)
+	defer func() { _ = m.Kill(handle.PID) }()
 
 	got, ok := m.GetHandle(handle.PID)
 	if !ok {
@@ -69,7 +69,9 @@ func TestIsAlive(t *testing.T) {
 		t.Fatal("expected process to be alive")
 	}
 
-	m.Kill(handle.PID)
+	if err := m.Kill(handle.PID); err != nil {
+		t.Fatalf("Kill failed: %v", err)
+	}
 	// Wait a bit for the process to die
 	time.Sleep(100 * time.Millisecond)
 
@@ -86,7 +88,7 @@ func TestReadWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
-	defer m.Kill(handle.PID)
+	defer func() { _ = m.Kill(handle.PID) }()
 
 	msg := "hello\n"
 	_, err = handle.PTY.Write([]byte(msg))
@@ -96,7 +98,7 @@ func TestReadWrite(t *testing.T) {
 
 	buf := make([]byte, 256)
 	// Set a read deadline so the test doesn't hang
-	handle.PTY.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = handle.PTY.SetReadDeadline(time.Now().Add(2 * time.Second))
 	n, err := handle.PTY.Read(buf)
 	if err != nil {
 		t.Fatalf("PTY read failed: %v", err)
@@ -116,7 +118,7 @@ func TestResize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
-	defer m.Kill(handle.PID)
+	defer func() { _ = m.Kill(handle.PID) }()
 
 	err = m.Resize(handle.PID, 40, 120)
 	if err != nil {

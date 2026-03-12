@@ -146,7 +146,9 @@ func TestSessionHandler_Create_EmptyNameDefaultsToDir(t *testing.T) {
 	}
 
 	var resp sessionResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 	if resp.Name != "tmp" {
 		t.Errorf("expected name 'tmp', got %q", resp.Name)
 	}
@@ -155,7 +157,9 @@ func TestSessionHandler_Create_EmptyNameDefaultsToDir(t *testing.T) {
 func TestSessionHandler_List(t *testing.T) {
 	handler, svc := setupHandler()
 
-	svc.CreateSession(context.Background(), "s1", "/tmp")
+	if _, err := svc.CreateSession(context.Background(), "s1", "/tmp"); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	w := httptest.NewRecorder()
@@ -194,7 +198,9 @@ func TestSessionHandler_Get(t *testing.T) {
 	}
 
 	var resp sessionResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 	if resp.ID != created.ID {
 		t.Errorf("expected ID %q, got %q", created.ID, resp.ID)
 	}

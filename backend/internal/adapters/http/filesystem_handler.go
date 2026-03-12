@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/Corwind/cmux/backend/internal/ports"
@@ -51,8 +52,10 @@ func (h *FilesystemHandler) ListDirectory(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(listDirResponse{
+	if err := json.NewEncoder(w).Encode(listDirResponse{
 		Path:    path,
 		Entries: resp,
-	})
+	}); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
 }

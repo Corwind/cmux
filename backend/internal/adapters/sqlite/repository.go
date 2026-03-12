@@ -52,7 +52,7 @@ func (r *Repository) List(ctx context.Context) ([]domain.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var sessions []domain.Session
 	for rows.Next() {

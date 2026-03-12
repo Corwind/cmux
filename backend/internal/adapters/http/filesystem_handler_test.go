@@ -82,7 +82,9 @@ func TestFilesystemHandler_ListDirectory_DefaultHome(t *testing.T) {
 	}
 
 	var resp listDirResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 	if resp.Path != "/home/user" {
 		t.Errorf("expected path '/home/user', got %q", resp.Path)
 	}
@@ -136,8 +138,10 @@ func TestFilesystemHandler_ListDirectory_EmptyDir(t *testing.T) {
 	}
 
 	var resp listDirResponse
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp.Entries != nil && len(resp.Entries) != 0 {
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Entries) != 0 {
 		t.Errorf("expected nil or empty entries, got %d", len(resp.Entries))
 	}
 }

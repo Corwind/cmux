@@ -76,8 +76,12 @@ func TestRepository_List(t *testing.T) {
 
 	s1 := makeSession("first")
 	s2 := makeSession("second")
-	repo.Create(ctx, s1)
-	repo.Create(ctx, s2)
+	if err := repo.Create(ctx, s1); err != nil {
+		t.Fatalf("Create s1 failed: %v", err)
+	}
+	if err := repo.Create(ctx, s2); err != nil {
+		t.Fatalf("Create s2 failed: %v", err)
+	}
 
 	sessions, err := repo.List(ctx)
 	if err != nil {
@@ -105,7 +109,9 @@ func TestRepository_Update(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 	s := makeSession("update-me")
-	repo.Create(ctx, s)
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
 
 	s.Status = domain.StatusStopped
 	s.Name = "updated-name"
@@ -126,7 +132,9 @@ func TestRepository_Delete(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 	s := makeSession("delete-me")
-	repo.Create(ctx, s)
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
 
 	if err := repo.Delete(ctx, s.ID); err != nil {
 		t.Fatalf("Delete failed: %v", err)
@@ -147,8 +155,12 @@ func TestRepository_ListOrderByCreatedAtDesc(t *testing.T) {
 	s2 := makeSession("newer")
 	s2.CreatedAt = time.Now()
 
-	repo.Create(ctx, s1)
-	repo.Create(ctx, s2)
+	if err := repo.Create(ctx, s1); err != nil {
+		t.Fatalf("Create s1 failed: %v", err)
+	}
+	if err := repo.Create(ctx, s2); err != nil {
+		t.Fatalf("Create s2 failed: %v", err)
+	}
 
 	sessions, _ := repo.List(ctx)
 	if sessions[0].Name != "newer" {

@@ -12,7 +12,7 @@ import (
 	"github.com/Corwind/cmux/backend/internal/adapters/pty"
 	"github.com/Corwind/cmux/backend/internal/adapters/sqlite"
 	"github.com/Corwind/cmux/backend/internal/app"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 func setupTestServer(t *testing.T) (*httptest.Server, *app.SessionService) {
@@ -27,7 +27,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *app.SessionService) {
 	pm := pty.NewManager(pty.WithCommand("cat"), pty.WithFixedArgs())
 	service := app.NewSessionService(repo, pm)
 
-	router := NewRouter(service, nil)
+	router := NewTestRouter(service, nil)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 
@@ -42,14 +42,16 @@ func TestWebSocketSendReceive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
-	t.Cleanup(func() { service.DeleteSession(ctx, session.ID) })
+	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID) })
+
+	time.Sleep(50 * time.Millisecond) // allow PTY to be ready
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/sessions/" + session.ID
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("websocket dial failed: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	// Write to PTY via websocket
 	testData := []byte("hello\n")
@@ -79,14 +81,16 @@ func TestWebSocketResize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
-	t.Cleanup(func() { service.DeleteSession(ctx, session.ID) })
+	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID) })
+
+	time.Sleep(50 * time.Millisecond) // allow PTY to be ready
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/sessions/" + session.ID
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("websocket dial failed: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	// Send resize message
 	msg := resizeMessage{Type: "resize", Rows: 50, Cols: 120}
@@ -119,12 +123,14 @@ func TestWebSocketProcessExit(t *testing.T) {
 		t.Fatalf("failed to create session: %v", err)
 	}
 
+	time.Sleep(50 * time.Millisecond) // allow PTY to be ready
+
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/sessions/" + session.ID
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("websocket dial failed: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	// Kill the process to trigger exit
 	err = service.ResizePTY(session.PID, 24, 80) // just to confirm it's alive
@@ -132,7 +138,7 @@ func TestWebSocketProcessExit(t *testing.T) {
 		t.Fatalf("resize before kill failed: %v", err)
 	}
 
-	service.DeleteSession(ctx, session.ID)
+	_ = service.DeleteSession(ctx, session.ID)
 
 	// Read from WS — we should get a status stopped message or connection close
 	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)

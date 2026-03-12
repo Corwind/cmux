@@ -3,6 +3,7 @@ package pty
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"sync"
@@ -120,7 +121,9 @@ func (m *Manager) Kill(pid int) error {
 		return fmt.Errorf("process %d not found", pid)
 	}
 
-	proc.handle.PTY.Close()
+	if err := proc.handle.PTY.Close(); err != nil {
+		log.Printf("failed to close PTY for pid %d: %v", pid, err)
+	}
 	return proc.cmd.Process.Signal(syscall.SIGTERM)
 }
 
@@ -134,7 +137,9 @@ func (m *Manager) KillAll() {
 	m.mu.Unlock()
 
 	for _, p := range procs {
-		p.handle.PTY.Close()
+		if err := p.handle.PTY.Close(); err != nil {
+			log.Printf("failed to close PTY for pid %d: %v", p.handle.PID, err)
+		}
 		_ = p.cmd.Process.Signal(syscall.SIGTERM)
 	}
 }

@@ -294,7 +294,9 @@ func TestGetPTYHandle_NotRunning(t *testing.T) {
 	s, _ := svc.CreateSession(context.Background(), "test", "/tmp")
 	// Mark as stopped in repo
 	s.Status = domain.StatusStopped
-	repo.Update(context.Background(), s)
+	if err := repo.Update(context.Background(), s); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
 
 	_, err := svc.GetPTYHandle(s.ID)
 	if err == nil {
