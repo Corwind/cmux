@@ -59,6 +59,7 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	cmd.Dir = workingDir
 	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	cmd.Env = append(cmd.Env, "LANG=en_US.UTF-8")
 
 	ptmx, err := ptylib.Start(cmd)
 	if err != nil {

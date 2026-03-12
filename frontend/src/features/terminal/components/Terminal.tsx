@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalProps {
@@ -65,6 +66,9 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
       term.loadAddon(new WebLinksAddon());
+      const unicodeAddon = new Unicode11Addon();
+      term.loadAddon(unicodeAddon);
+      term.unicode.activeVersion = "11";
       term.open(container);
       fitAddon.fit();
 
