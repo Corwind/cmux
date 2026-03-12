@@ -122,17 +122,18 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         }
       };
 
-      // Intercept Shift+Enter to send kitty keyboard protocol escape sequence
-      // so Claude Code treats it as newline (multi-line input) instead of submit.
-      currentTerm.attachCustomKeyEventHandler((event) => {
-        if (event.type === "keydown" && event.key === "Enter" && event.shiftKey) {
+      // Intercept Shift+Enter at the DOM level (capture phase) to fully prevent
+      // xterm.js from also sending \r. Send kitty protocol escape sequence instead.
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Enter" && event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
           if (currentWs.readyState === WebSocket.OPEN) {
             currentWs.send(encoder.encode("\x1b[13;2u"));
           }
-          return false;
         }
-        return true;
-      });
+      };
+      container.addEventListener("keydown", onKeyDown, true);
 
       currentTerm.onData((data) => {
         if (currentWs.readyState === WebSocket.OPEN) {
@@ -166,6 +167,9 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       term = null;
       ws = null;
     };
+
+    // Note: container event listeners are cleaned up when term.dispose()
+    // removes the terminal DOM elements, and when the container is unmounted.
 
     cleanupRef.current = cleanup;
 
