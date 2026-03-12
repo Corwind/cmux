@@ -24,7 +24,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *app.SessionService) {
 		t.Fatalf("failed to create repository: %v", err)
 	}
 
-	pm := pty.NewManager(pty.WithCommand("cat"), pty.WithFixedArgs())
+	pm := pty.NewManager(pty.WithCommand("sh"), pty.WithFixedArgs())
 	service := app.NewSessionService(repo, pm)
 
 	router := NewTestRouter(service, nil)
