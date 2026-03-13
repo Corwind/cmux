@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/api-client";
+import { env } from "@/config/env";
 import type {
   CreateTemplateInput,
   SandboxTemplate,
@@ -46,7 +47,7 @@ export function importTemplate(
 
 export async function exportTemplate(id: string): Promise<Blob> {
   const response = await fetch(
-    `${window.location.origin}/api/templates/${id}/export`,
+    `${env.apiBaseUrl}/templates/${id}/export`,
   );
   if (!response.ok) {
     throw new Error(`Export failed: ${response.statusText}`);
