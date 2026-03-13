@@ -1,0 +1,3 @@
+(version 1)
+(deny default)
+(allow file-read* (subpath "/tmp"))

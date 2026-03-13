@@ -1,0 +1,2 @@
+;; Allow extra file access
+(allow file-read* (subpath "/opt/tools"))
