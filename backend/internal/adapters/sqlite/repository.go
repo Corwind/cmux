@@ -23,6 +23,10 @@ func NewRepository(dbPath string) (*Repository, error) {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
+	if _, err := db.Exec(createTemplatesTable); err != nil {
+		return nil, fmt.Errorf("failed to run template migrations: %w", err)
+	}
+
 	return &Repository{db: db}, nil
 }
 
