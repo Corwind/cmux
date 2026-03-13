@@ -73,6 +73,11 @@
 │                         │                             │
 │                         ▼                             │
 │                  ┌──────────────┐                     │
+│                  │  sandbox-exec│                     │
+│                  │   (macOS)    │                     │
+│                  └──────┬───────┘                     │
+│                         ▼                             │
+│                  ┌──────────────┐                     │
 │                  │  claude CLI  │                     │
 │                  │    (PTY)     │                     │
 │                  └──────────────┘                     │
@@ -127,6 +132,20 @@ make clean     # remove build artifacts
 | `GET` | `/api/fs?path=` | 📂 Browse directories |
 | `WS` | `/ws/sessions/:id` | 🔌 Terminal WebSocket (binary: PTY I/O, text: resize/status) |
 
+## 🔒 Sandbox
+
+Every Claude Code session runs inside a macOS `sandbox-exec` jail with **deny-by-default** rules. The sandbox restricts filesystem writes to the working directory, Claude config files, and temp directories — preventing Claude from modifying files outside its scope.
+
+**What's allowed:**
+
+| Access | Paths |
+|--------|-------|
+| **Read** | System paths (`/usr`, `/System`, `/Library`, `/bin`, `/sbin`, `/opt`, `/private`, `/dev`), working directory, Claude config (`~/.claude`, `~/.config`, `~/.local`), shell dotfiles, `~/Library/Keychains` |
+| **Write** | Working directory, `~/.claude`, `~/.config`, `~/.claude.json`, temp dirs (`/tmp`, `/private/tmp`, `/private/var/folders`), `/dev` |
+| **Blocked** | `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/Documents`, `~/Desktop`, other projects, any path not explicitly listed |
+
+The sandbox profile can be extended via templates stored in the `sandbox-profiles/` directory, or by passing custom SBPL rules through the session creation API.
+
 ## 🛠️ Tech Stack
 
 <table>
@@ -155,6 +174,7 @@ cmux/
 │           ├── http/              # 🌐 REST + WebSocket handlers
 │           ├── sqlite/            # 💾 Persistence
 │           ├── pty/               # 🖥️ PTY process management
+│           │   └── sandbox/      # 🔒 sandbox-exec profile builder
 │           └── filesystem/        # 📂 Directory browser
 │
 └── 🖼️ frontend/
