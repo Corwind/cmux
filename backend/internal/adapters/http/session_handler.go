@@ -18,9 +18,10 @@ func NewSessionHandler(service *app.SessionService) *SessionHandler {
 }
 
 type createSessionRequest struct {
-	Name       string `json:"name"`
-	WorkingDir string `json:"working_dir"`
-	TemplateID string `json:"template_id"`
+	Name            string `json:"name"`
+	WorkingDir      string `json:"working_dir"`
+	TemplateID      string `json:"template_id"`
+	SkipPermissions bool   `json:"skip_permissions"`
 }
 
 type sessionResponse struct {
@@ -40,7 +41,7 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.service.CreateSession(r.Context(), req.Name, req.WorkingDir, req.TemplateID)
+	session, err := h.service.CreateSession(r.Context(), req.Name, req.WorkingDir, req.TemplateID, req.SkipPermissions)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

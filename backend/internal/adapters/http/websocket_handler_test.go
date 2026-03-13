@@ -38,7 +38,7 @@ func TestWebSocketSendReceive(t *testing.T) {
 	server, service := setupTestServer(t)
 
 	ctx := context.Background()
-	session, err := service.CreateSession(ctx, "test-session", os.TempDir(), "")
+	session, err := service.CreateSession(ctx, "test-session", os.TempDir(), "", false)
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestWebSocketResize(t *testing.T) {
 	server, service := setupTestServer(t)
 
 	ctx := context.Background()
-	session, err := service.CreateSession(ctx, "test-resize", os.TempDir(), "")
+	session, err := service.CreateSession(ctx, "test-resize", os.TempDir(), "", false)
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestWebSocketProcessExit(t *testing.T) {
 	server, service := setupTestServer(t)
 
 	ctx := context.Background()
-	session, err := service.CreateSession(ctx, "test-exit", os.TempDir(), "")
+	session, err := service.CreateSession(ctx, "test-exit", os.TempDir(), "", false)
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
