@@ -85,15 +85,32 @@ func buildProfile(templateFragments []string) string {
 	b.WriteString("(allow network-outbound)\n")
 	b.WriteString("(allow system-socket)\n")
 
-	// File reads — broadly allowed. Claude Code (Node.js) needs to read system
-	// libraries, executables, home directory configs, and toolchain paths that
-	// cannot be fully enumerated. The security boundary is on writes, not reads.
-	b.WriteString("\n;; file reads (broad — security boundary is on writes)\n")
-	b.WriteString("(allow file-read*)\n")
-
 	// File metadata everywhere (needed for path resolution, stat, etc.)
 	b.WriteString("\n;; file metadata (needed for path resolution)\n")
 	b.WriteString("(allow file-read-metadata)\n")
+
+	// Root directory (needed for readdir by Node.js path resolution)
+	b.WriteString("\n;; root directory listing\n")
+	b.WriteString(`(allow file-read* (literal "/"))` + "\n")
+
+	// System paths (read-only)
+	b.WriteString("\n;; system paths (read-only)\n")
+	b.WriteString(`(allow file-read* (subpath "/usr"))` + "\n")
+	b.WriteString(`(allow file-read* (subpath "/System"))` + "\n")
+	b.WriteString(`(allow file-read* (subpath "/Library"))` + "\n")
+	b.WriteString(`(allow file-read* (subpath "/bin"))` + "\n")
+	b.WriteString(`(allow file-read* (subpath "/sbin"))` + "\n")
+	b.WriteString(`(allow file-read* (subpath "/opt"))` + "\n")
+	b.WriteString(`(allow file-read* (subpath "/private"))` + "\n")
+	b.WriteString(`(allow file-read* (subpath "/dev"))` + "\n")
+
+	// Home directory (read-only — write restricted to specific subdirs below)
+	b.WriteString("\n;; home directory (read-only)\n")
+	b.WriteString(`(allow file-read* (subpath (param "HOME_DIR")))` + "\n")
+
+	// Working directory (read)
+	b.WriteString("\n;; working directory (read)\n")
+	b.WriteString(`(allow file-read* (subpath (param "WORKING_DIR")))` + "\n")
 
 	// Device files (PTY, null, random)
 	b.WriteString("\n;; device files (read/write)\n")
