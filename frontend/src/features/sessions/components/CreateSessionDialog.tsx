@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useCreateSession } from "../hooks/useCreateSession";
 import { useSessionsStore } from "../stores/sessions.store";
 import { FileBrowser } from "@/features/file-browser";
+import { TemplateSelector } from "@/features/templates";
 
 export function CreateSessionDialog() {
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState("");
+  const [templateId, setTemplateId] = useState("");
   const [showFileBrowser, setShowFileBrowser] = useState(false);
+  const handleTemplateChange = useCallback((id: string) => setTemplateId(id), []);
   const createSession = useCreateSession();
   const setActiveSession = useSessionsStore((s) => s.setActiveSession);
 
@@ -15,11 +18,14 @@ export function CreateSessionDialog() {
     e.preventDefault();
     if (!directory.trim()) return;
 
-    const input: { name?: string; working_dir: string } = {
+    const input: { name?: string; working_dir: string; template_id?: string } = {
       working_dir: directory.trim(),
     };
     if (name.trim()) {
       input.name = name.trim();
+    }
+    if (templateId) {
+      input.template_id = templateId;
     }
 
     createSession.mutate(input, {
@@ -27,6 +33,7 @@ export function CreateSessionDialog() {
         setActiveSession(session.id);
         setName("");
         setDirectory("");
+        setTemplateId("");
         setIsOpen(false);
       },
     });
@@ -105,6 +112,7 @@ export function CreateSessionDialog() {
             </button>
           </div>
         </div>
+        <TemplateSelector value={templateId} onChange={handleTemplateChange} />
         <div className="flex gap-2">
           <button
             type="submit"

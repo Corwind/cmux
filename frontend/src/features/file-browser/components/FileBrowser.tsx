@@ -4,11 +4,13 @@ import { useFileBrowser } from "../hooks/useFileBrowser";
 interface FileBrowserProps {
   onSelect: (path: string) => void;
   onClose: () => void;
+  showHidden?: boolean;
+  showFiles?: boolean;
 }
 
-export function FileBrowser({ onSelect, onClose }: FileBrowserProps) {
+export function FileBrowser({ onSelect, onClose, showHidden, showFiles }: FileBrowserProps) {
   const [currentPath, setCurrentPath] = useState<string | undefined>(undefined);
-  const { data, isLoading, error } = useFileBrowser(currentPath);
+  const { data, isLoading, error } = useFileBrowser(currentPath, showHidden);
 
   useEffect(() => {
     if (data && !currentPath) {
@@ -113,6 +115,32 @@ export function FileBrowser({ onSelect, onClose }: FileBrowserProps) {
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                        />
+                      </svg>
+                      <span className="truncate">{entry.name}</span>
+                    </button>
+                  </li>
+                ))}
+              {showFiles && entries
+                .filter((entry) => !entry.is_dir)
+                .map((entry) => (
+                  <li key={entry.name}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(`${displayPath === "/" ? "" : displayPath}/${entry.name}`)}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-gray-400 hover:bg-gray-800 hover:text-white"
+                    >
+                      <svg
+                        className="h-4 w-4 shrink-0 text-gray-500"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
                         />
                       </svg>
                       <span className="truncate">{entry.name}</span>

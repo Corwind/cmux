@@ -6,9 +6,11 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"syscall"
 
+	"github.com/Corwind/cmux/backend/internal/adapters/pty/sandbox"
 	"github.com/Corwind/cmux/backend/internal/ports"
 	ptylib "github.com/creack/pty/v2"
 )
@@ -32,11 +34,26 @@ func WithFixedArgs(args ...string) Option {
 	}
 }
 
+func WithSandbox(builder *sandbox.ProfileBuilder) Option {
+	return func(m *Manager) {
+		m.sandboxBuilder = builder
+	}
+}
+
+func WithSandboxTemplates(templates ...string) Option {
+	return func(m *Manager) {
+		m.sandboxTemplates = templates
+	}
+}
+
 type Manager struct {
-	mu        sync.RWMutex
-	processes map[int]*managedProcess
-	command   string
-	fixedArgs []string
+	mu               sync.RWMutex
+	processes        map[int]*managedProcess
+	command          string
+	fixedArgs        []string
+	sandboxBuilder   *sandbox.ProfileBuilder
+	sandboxTemplates []string
+	sandboxContent   []string
 }
 
 func NewManager(opts ...Option) *Manager {
@@ -55,8 +72,26 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	if m.fixedArgs != nil {
 		spawnArgs = m.fixedArgs
 	}
-	cmd := exec.Command(m.command, spawnArgs...)
-	cmd.Dir = workingDir
+
+	// Resolve symlinks so sandbox profile and cmd.Dir use the same real path
+	// (e.g., /var/folders -> /private/var/folders on macOS)
+	resolvedDir, err := filepath.EvalSymlinks(workingDir)
+	if err != nil {
+		resolvedDir = workingDir
+	}
+
+	var cmd *exec.Cmd
+	if m.sandboxBuilder != nil {
+		sandboxCmd, err := m.buildSandboxCommand(resolvedDir, spawnArgs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build sandbox command: %w", err)
+		}
+		cmd = sandboxCmd
+	} else {
+		cmd = exec.Command(m.command, spawnArgs...)
+	}
+
+	cmd.Dir = resolvedDir
 	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 	cmd.Env = append(cmd.Env, "LANG=en_US.UTF-8")
@@ -158,4 +193,49 @@ func (m *Manager) GetHandle(pid int) (*ports.PTYHandle, bool) {
 		return nil, false
 	}
 	return proc.handle, true
+}
+
+// SetSandboxContent sets raw SBPL content strings to use for the next spawn.
+// The content is cleared after use.
+func (m *Manager) SetSandboxContent(contents []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sandboxContent = contents
+}
+
+func (m *Manager) buildSandboxCommand(workingDir string, originalArgs []string) (*exec.Cmd, error) {
+	cfg := sandbox.ProfileConfig{
+		WorkingDir:    workingDir,
+		TemplateNames: m.sandboxTemplates,
+	}
+
+	var profile string
+	var err error
+
+	// Use sandboxContent if set, otherwise use template names from files
+	m.mu.Lock()
+	content := m.sandboxContent
+	m.sandboxContent = nil
+	m.mu.Unlock()
+
+	if len(content) > 0 {
+		profile, err = m.sandboxBuilder.BuildWithContent(cfg, content)
+	} else {
+		profile, err = m.sandboxBuilder.Build(cfg)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("build sandbox profile: %w", err)
+	}
+
+	params := m.sandboxBuilder.Params(cfg)
+
+	// Build sandbox-exec args: -p <profile> -D KEY=VALUE ... <command> <args...>
+	sandboxArgs := []string{"-p", profile}
+	for key, value := range params {
+		sandboxArgs = append(sandboxArgs, "-D", key+"="+value)
+	}
+	sandboxArgs = append(sandboxArgs, m.command)
+	sandboxArgs = append(sandboxArgs, originalArgs...)
+
+	return exec.Command("sandbox-exec", sandboxArgs...), nil
 }

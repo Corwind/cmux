@@ -37,7 +37,8 @@ func (h *FilesystemHandler) ListDirectory(w http.ResponseWriter, r *http.Request
 		path = home
 	}
 
-	entries, err := h.browser.ListDir(path)
+	showHidden := r.URL.Query().Get("showHidden") == "true"
+	entries, err := h.browser.ListDir(path, showHidden)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

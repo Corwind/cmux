@@ -6,6 +6,9 @@ interface ListDirResponse {
   entries: DirEntry[];
 }
 
-export async function listDirectory(path?: string): Promise<ListDirResponse> {
-  return apiClient.get<ListDirResponse>("/fs", path ? { path } : {});
+export async function listDirectory(path?: string, showHidden?: boolean): Promise<ListDirResponse> {
+  const params: Record<string, string> = {};
+  if (path) params.path = path;
+  if (showHidden) params.showHidden = "true";
+  return apiClient.get<ListDirResponse>("/fs", params);
 }

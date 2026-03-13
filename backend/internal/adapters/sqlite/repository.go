@@ -23,6 +23,10 @@ func NewRepository(dbPath string) (*Repository, error) {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
+	if _, err := db.Exec(createTemplatesTable); err != nil {
+		return nil, fmt.Errorf("failed to run template migrations: %w", err)
+	}
+
 	return &Repository{db: db}, nil
 }
 
@@ -76,6 +80,10 @@ func (r *Repository) Update(ctx context.Context, session domain.Session) error {
 func (r *Repository) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM sessions WHERE id = ?", id)
 	return err
+}
+
+func (r *Repository) DB() *sql.DB {
+	return r.db
 }
 
 func (r *Repository) Close() error {

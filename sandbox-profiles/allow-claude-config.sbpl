@@ -1,0 +1,3 @@
+;; Claude config read/write (uses HOME_DIR param)
+(allow file-read* (subpath (string-append (param "HOME_DIR") "/.claude")))
+(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))

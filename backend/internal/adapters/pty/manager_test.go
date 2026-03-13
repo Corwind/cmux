@@ -171,3 +171,4 @@ func TestWithCommandOption(t *testing.T) {
 		t.Fatalf("expected command 'echo', got %q", m.command)
 	}
 }
+

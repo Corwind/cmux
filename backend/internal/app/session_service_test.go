@@ -112,9 +112,9 @@ func (m *mockProcessManager) GetHandle(pid int) (*ports.PTYHandle, bool) {
 func TestCreateSession_Success(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	s, err := svc.CreateSession(context.Background(), "test", "/tmp")
+	s, err := svc.CreateSession(context.Background(), "test", "/tmp", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -136,9 +136,9 @@ func TestCreateSession_Success(t *testing.T) {
 func TestCreateSession_EmptyNameDefaultsToDir(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	session, err := svc.CreateSession(context.Background(), "", "/home/user/my-project")
+	session, err := svc.CreateSession(context.Background(), "", "/home/user/my-project", "")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -150,9 +150,9 @@ func TestCreateSession_EmptyNameDefaultsToDir(t *testing.T) {
 func TestCreateSession_EmptyWorkingDir(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	_, err := svc.CreateSession(context.Background(), "test", "")
+	_, err := svc.CreateSession(context.Background(), "test", "", "")
 	if err == nil {
 		t.Fatal("expected error for empty working dir")
 	}
@@ -162,9 +162,9 @@ func TestCreateSession_SpawnFailure(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
 	pm.spawnErr = fmt.Errorf("spawn failed")
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	_, err := svc.CreateSession(context.Background(), "test", "/tmp")
+	_, err := svc.CreateSession(context.Background(), "test", "/tmp", "")
 	if err == nil {
 		t.Fatal("expected error when spawn fails")
 	}
@@ -176,9 +176,9 @@ func TestCreateSession_RepoFailureKillsProcess(t *testing.T) {
 		return fmt.Errorf("db error")
 	}
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	_, err := svc.CreateSession(context.Background(), "test", "/tmp")
+	_, err := svc.CreateSession(context.Background(), "test", "/tmp", "")
 	if err == nil {
 		t.Fatal("expected error when repo fails")
 	}
@@ -190,9 +190,9 @@ func TestCreateSession_RepoFailureKillsProcess(t *testing.T) {
 func TestGetSession(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	created, _ := svc.CreateSession(context.Background(), "test", "/tmp")
+	created, _ := svc.CreateSession(context.Background(), "test", "/tmp", "")
 	got, err := svc.GetSession(context.Background(), created.ID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -205,7 +205,7 @@ func TestGetSession(t *testing.T) {
 func TestGetSession_NotFound(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
 	_, err := svc.GetSession(context.Background(), "nonexistent")
 	if err == nil {
@@ -216,9 +216,9 @@ func TestGetSession_NotFound(t *testing.T) {
 func TestListSessions_UpdatesDeadProcesses(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	s, _ := svc.CreateSession(context.Background(), "test", "/tmp")
+	s, _ := svc.CreateSession(context.Background(), "test", "/tmp", "")
 	// Simulate process death
 	delete(pm.alive, s.PID)
 
@@ -237,9 +237,9 @@ func TestListSessions_UpdatesDeadProcesses(t *testing.T) {
 func TestDeleteSession_KillsRunningProcess(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	s, _ := svc.CreateSession(context.Background(), "test", "/tmp")
+	s, _ := svc.CreateSession(context.Background(), "test", "/tmp", "")
 	if err := svc.DeleteSession(context.Background(), s.ID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestDeleteSession_KillsRunningProcess(t *testing.T) {
 func TestDeleteSession_NotFound(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
 	err := svc.DeleteSession(context.Background(), "nonexistent")
 	if err == nil {
@@ -274,9 +274,9 @@ func TestDeleteSession_NotFound(t *testing.T) {
 func TestGetPTYHandle_Success(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	s, _ := svc.CreateSession(context.Background(), "test", "/tmp")
+	s, _ := svc.CreateSession(context.Background(), "test", "/tmp", "")
 	h, err := svc.GetPTYHandle(s.ID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -289,9 +289,9 @@ func TestGetPTYHandle_Success(t *testing.T) {
 func TestGetPTYHandle_NotRunning(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
-	s, _ := svc.CreateSession(context.Background(), "test", "/tmp")
+	s, _ := svc.CreateSession(context.Background(), "test", "/tmp", "")
 	// Mark as stopped in repo
 	s.Status = domain.StatusStopped
 	if err := repo.Update(context.Background(), s); err != nil {
@@ -307,7 +307,7 @@ func TestGetPTYHandle_NotRunning(t *testing.T) {
 func TestResizePTY(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm)
+	svc := NewSessionService(repo, pm, nil)
 
 	err := svc.ResizePTY(42, 24, 80)
 	if err != nil {

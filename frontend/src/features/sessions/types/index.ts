@@ -11,6 +11,7 @@ export interface Session {
 export interface CreateSessionInput {
   name?: string;
   working_dir: string;
+  template_id?: string;
 }
 
 export interface DirEntry {

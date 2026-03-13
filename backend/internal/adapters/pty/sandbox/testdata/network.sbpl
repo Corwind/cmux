@@ -1,0 +1,4 @@
+;; Allow network operations
+(allow network-outbound
+  (remote tcp "*:80")
+  (remote tcp "*:443"))

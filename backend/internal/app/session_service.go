@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
@@ -12,21 +13,26 @@ import (
 type SessionService struct {
 	repo           ports.SessionRepository
 	processManager ports.ProcessManager
+	templateRepo   ports.TemplateRepository
 	mu             sync.RWMutex
 }
 
-func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager) *SessionService {
+func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, templateRepo ports.TemplateRepository) *SessionService {
 	return &SessionService{
 		repo:           repo,
 		processManager: pm,
+		templateRepo:   templateRepo,
 	}
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, name, workingDir string) (domain.Session, error) {
+func (s *SessionService) CreateSession(ctx context.Context, name, workingDir, templateID string) (domain.Session, error) {
 	session, err := domain.NewSession(name, workingDir)
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
 	}
+
+	// Resolve sandbox template content
+	s.applySandboxContent(ctx, templateID)
 
 	handle, err := s.processManager.Spawn(ctx, workingDir, "--session-id", session.ClaudeSessionID)
 	if err != nil {
@@ -44,6 +50,35 @@ func (s *SessionService) CreateSession(ctx context.Context, name, workingDir str
 	go s.watchProcess(session.ID, handle)
 
 	return session, nil
+}
+
+func (s *SessionService) applySandboxContent(ctx context.Context, templateID string) {
+	if s.templateRepo == nil {
+		return
+	}
+
+	provider, ok := s.processManager.(ports.SandboxContentProvider)
+	if !ok {
+		return
+	}
+
+	var tmpl domain.SandboxTemplate
+	var err error
+
+	if templateID != "" {
+		tmpl, err = s.templateRepo.Get(ctx, templateID)
+	} else {
+		tmpl, err = s.templateRepo.GetDefault(ctx)
+	}
+
+	if err != nil {
+		if templateID != "" {
+			log.Printf("failed to resolve template %s: %v", templateID, err)
+		}
+		return
+	}
+
+	provider.SetSandboxContent([]string{tmpl.Content})
 }
 
 func (s *SessionService) ResumeSession(ctx context.Context, id string) (domain.Session, error) {

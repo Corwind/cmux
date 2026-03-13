@@ -19,7 +19,7 @@ type mockFileBrowser struct {
 	homeDirErr error
 }
 
-func (m *mockFileBrowser) ListDir(path string) ([]ports.DirEntry, error) {
+func (m *mockFileBrowser) ListDir(path string, showHidden bool) ([]ports.DirEntry, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}

@@ -14,7 +14,7 @@ func NewBrowser() *Browser {
 	return &Browser{}
 }
 
-func (b *Browser) ListDir(path string) ([]ports.DirEntry, error) {
+func (b *Browser) ListDir(path string, showHidden bool) ([]ports.DirEntry, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory: %w", err)
@@ -22,8 +22,7 @@ func (b *Browser) ListDir(path string) ([]ports.DirEntry, error) {
 
 	var result []ports.DirEntry
 	for _, entry := range entries {
-		// Skip hidden files
-		if entry.Name()[0] == '.' {
+		if !showHidden && entry.Name()[0] == '.' {
 			continue
 		}
 		result = append(result, ports.DirEntry{
