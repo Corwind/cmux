@@ -47,7 +47,7 @@ func TestSandboxDeniesFileWriteOutsideWorkDir(t *testing.T) {
 
 	// Write a marker inside workdir (should succeed), then attempt to write
 	// outside workdir (should be denied by sandbox). Use resolved paths.
-	deniedFile := "/private/tmp/sandbox-test-denied-" + filepath.Base(resolvedWorkDir)
+	deniedFile := "/private/sandbox-test-denied-" + filepath.Base(resolvedWorkDir)
 	markerFile := filepath.Join(resolvedWorkDir, "marker")
 	script := "touch " + markerFile + "; touch " + deniedFile + " 2>/dev/null; exit 0"
 

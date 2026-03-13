@@ -85,54 +85,33 @@ func buildProfile(templateFragments []string) string {
 	b.WriteString("(allow network-outbound)\n")
 	b.WriteString("(allow system-socket)\n")
 
-	// System libraries and frameworks (read-only)
-	b.WriteString("\n;; system libraries (read-only)\n")
-	b.WriteString(`(allow file-read* (subpath "/usr/lib"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/usr/share"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/System/Library"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/Library"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/private/var/db/dyld"))` + "\n")
-
-	// Standard executables (read-only)
-	b.WriteString("\n;; standard executables (read-only)\n")
-	b.WriteString(`(allow file-read* (subpath "/usr/bin"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/usr/sbin"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/bin"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/sbin"))` + "\n")
-
-	// Homebrew / common tool paths (read-only)
-	b.WriteString("\n;; common tool paths (read-only)\n")
-	b.WriteString(`(allow file-read* (subpath "/opt/homebrew"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/usr/local"))` + "\n")
-
-	// Temp directories (read/write) — needed for Node.js, build tools, etc.
-	b.WriteString("\n;; temp directories\n")
-	b.WriteString(`(allow file-read* (subpath "/tmp"))` + "\n")
-	b.WriteString(`(allow file-write* (subpath "/tmp"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/private/tmp"))` + "\n")
-	b.WriteString(`(allow file-write* (subpath "/private/tmp"))` + "\n")
-	b.WriteString(`(allow file-read* (subpath "/private/var/folders"))` + "\n")
-	b.WriteString(`(allow file-write* (subpath "/private/var/folders"))` + "\n")
-
-	// Device files (PTY, null, random)
-	b.WriteString("\n;; device files\n")
-	b.WriteString(`(allow file-read* (subpath "/dev"))` + "\n")
-	b.WriteString(`(allow file-write* (subpath "/dev"))` + "\n")
+	// File reads — broadly allowed. Claude Code (Node.js) needs to read system
+	// libraries, executables, home directory configs, and toolchain paths that
+	// cannot be fully enumerated. The security boundary is on writes, not reads.
+	b.WriteString("\n;; file reads (broad — security boundary is on writes)\n")
+	b.WriteString("(allow file-read*)\n")
 
 	// File metadata everywhere (needed for path resolution, stat, etc.)
 	b.WriteString("\n;; file metadata (needed for path resolution)\n")
 	b.WriteString("(allow file-read-metadata)\n")
 
-	// Working directory (read/write)
-	b.WriteString("\n;; working directory (read/write)\n")
-	b.WriteString(`(allow file-read* (subpath (param "WORKING_DIR")))` + "\n")
+	// Device files (PTY, null, random)
+	b.WriteString("\n;; device files (read/write)\n")
+	b.WriteString(`(allow file-write* (subpath "/dev"))` + "\n")
+
+	// Temp directories (write) — needed for Node.js, build tools, etc.
+	b.WriteString("\n;; temp directories (write)\n")
+	b.WriteString(`(allow file-write* (subpath "/tmp"))` + "\n")
+	b.WriteString(`(allow file-write* (subpath "/private/tmp"))` + "\n")
+	b.WriteString(`(allow file-write* (subpath "/private/var/folders"))` + "\n")
+
+	// Working directory (write)
+	b.WriteString("\n;; working directory (write)\n")
 	b.WriteString(`(allow file-write* (subpath (param "WORKING_DIR")))` + "\n")
 
-	// Claude Code config — only ~/.claude and ~/.config (read/write)
-	b.WriteString("\n;; claude config (read/write)\n")
-	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.claude")))` + "\n")
+	// Claude Code config — ~/.claude and ~/.config (write)
+	b.WriteString("\n;; claude config (write)\n")
 	b.WriteString(`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))` + "\n")
-	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.config")))` + "\n")
 	b.WriteString(`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.config")))` + "\n")
 
 	// Template fragments (additional access rules)
