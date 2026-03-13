@@ -26,11 +26,10 @@ func TestBuildBasicProfile(t *testing.T) {
 	requiredFragments := []string{
 		"(allow process-exec*)",
 		"(allow process-fork)",
-		`(allow file-read* (subpath "/usr/lib"))`,
-		`(allow file-read* (subpath "/System/Library"))`,
-		`(allow file-read* (subpath (param "WORKING_DIR")))`,
+		"(allow file-read*)",
 		`(allow file-write* (subpath (param "WORKING_DIR")))`,
-		`(subpath (param "HOME_DIR"))`,
+		`(allow file-write* (subpath (param "HOME_DIR")))`,
+		`(allow file-write* (subpath "/dev"))`,
 	}
 
 	for _, frag := range requiredFragments {
@@ -174,20 +173,3 @@ func TestBuildRejectsTemplateNameWithPathTraversal(t *testing.T) {
 	}
 }
 
-func TestBuildIncludesClaudeBinaryPath(t *testing.T) {
-	pb := NewProfileBuilder(testdataDir(t))
-
-	cfg := ProfileConfig{
-		WorkingDir: "/tmp/project",
-		HomeDir:    "/Users/testuser",
-	}
-
-	profile, err := pb.Build(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// The profile should contain a comment about claude binary
-	// Even if claude isn't on PATH, the build should not fail
-	_ = profile
-}

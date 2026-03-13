@@ -3,8 +3,6 @@ package sandbox
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -42,28 +40,22 @@ func (pb *ProfileBuilder) Build(cfg ProfileConfig) (string, error) {
 		b.WriteString(rule + "\n")
 	}
 
-	// System read paths
-	b.WriteString("\n;; system read paths\n")
-	for _, rule := range systemReadPaths() {
-		b.WriteString(rule + "\n")
-	}
+	// Allow all reads - the sandbox primarily restricts file writes
+	b.WriteString("\n;; read access (unrestricted - sandbox focuses on write containment)\n")
+	b.WriteString("(allow file-read*)\n")
+	b.WriteString("(allow file-read-metadata)\n")
 
-	// Claude binary path
-	if binRules := claudeBinaryRules(); len(binRules) > 0 {
-		b.WriteString("\n;; claude binary\n")
-		for _, rule := range binRules {
-			b.WriteString(rule + "\n")
-		}
-	}
+	// Device write access for PTY/stdout/stderr
+	b.WriteString("\n;; device write access\n")
+	b.WriteString(`(allow file-write* (subpath "/dev"))` + "\n")
 
-	// Working directory
+	// Working directory write access
 	b.WriteString("\n;; working directory\n")
-	b.WriteString(`(allow file-read* (subpath (param "WORKING_DIR")))` + "\n")
 	b.WriteString(`(allow file-write* (subpath (param "WORKING_DIR")))` + "\n")
 
-	// Home directory for config
+	// Home directory write access for .claude config
 	b.WriteString("\n;; home directory config\n")
-	b.WriteString(`(allow file-read* (subpath (param "HOME_DIR")))` + "\n")
+	b.WriteString(`(allow file-write* (subpath (param "HOME_DIR")))` + "\n")
 
 	// Template fragments
 	for _, name := range cfg.TemplateNames {
@@ -104,21 +96,7 @@ func basePermissions() []string {
 		"(allow network-outbound)",
 		"(allow system-socket)",
 		"(allow signal)",
-	}
-}
-
-func systemReadPaths() []string {
-	return []string{
-		`(allow file-read* (subpath "/usr/lib"))`,
-		`(allow file-read* (subpath "/usr/share"))`,
-		`(allow file-read* (subpath "/System/Library"))`,
-		`(allow file-read* (subpath "/usr/bin"))`,
-		`(allow file-read* (subpath "/bin"))`,
-		`(allow file-read* (literal "/dev/ptmx"))`,
-		`(allow file-read* (regex #"/dev/tty.*"))`,
-		`(allow file-read* (literal "/dev/null"))`,
-		`(allow file-read* (literal "/dev/urandom"))`,
-		`(allow file-read-metadata)`,
+		"(allow file-ioctl)",
 	}
 }
 
@@ -134,26 +112,3 @@ func validateTemplateName(name string) error {
 	return nil
 }
 
-func claudeBinaryRules() []string {
-	path, err := exec.LookPath("claude")
-	if err != nil {
-		return nil
-	}
-
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		resolved = path
-	}
-
-	var rules []string
-	dir := filepath.Dir(resolved)
-	rules = append(rules, fmt.Sprintf(`(allow file-read* (subpath "%s"))`, dir))
-
-	// If the binary is in a nested path, also allow the parent
-	parent := filepath.Dir(dir)
-	if parent != dir {
-		rules = append(rules, fmt.Sprintf(`(allow file-read* (subpath "%s"))`, parent))
-	}
-
-	return rules
-}

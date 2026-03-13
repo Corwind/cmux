@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	httpadapter "github.com/Corwind/cmux/backend/internal/adapters/http"
 	"github.com/Corwind/cmux/backend/internal/adapters/filesystem"
 	"github.com/Corwind/cmux/backend/internal/adapters/pty"
+	"github.com/Corwind/cmux/backend/internal/adapters/pty/sandbox"
 	"github.com/Corwind/cmux/backend/internal/adapters/sqlite"
 )
 
@@ -32,7 +34,23 @@ func main() {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
 
-	processManager := pty.NewManager()
+	var managerOpts []pty.Option
+	if os.Getenv("CMUX_SANDBOX_ENABLED") == "true" {
+		templateDir := os.Getenv("CMUX_SANDBOX_TEMPLATE_DIR")
+		if templateDir == "" {
+			templateDir = "sandbox-profiles"
+		}
+		builder := sandbox.NewProfileBuilder(templateDir)
+		managerOpts = append(managerOpts, pty.WithSandbox(builder))
+
+		if tmplEnv := os.Getenv("CMUX_SANDBOX_TEMPLATES"); tmplEnv != "" {
+			templates := strings.Split(tmplEnv, ",")
+			managerOpts = append(managerOpts, pty.WithSandboxTemplates(templates...))
+		}
+		log.Printf("sandbox mode enabled (template dir: %s)", templateDir)
+	}
+
+	processManager := pty.NewManager(managerOpts...)
 	fileBrowser := filesystem.NewBrowser()
 	sessionService := appservice.NewSessionService(repo, processManager)
 
