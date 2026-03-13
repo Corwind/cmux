@@ -30,7 +30,9 @@ func TestBuildBasicProfile(t *testing.T) {
 		`(allow file-read* (subpath "/usr"))`,
 		`(allow file-read* (subpath "/System"))`,
 		`(allow file-read* (subpath "/private"))`,
-		`(allow file-read* (subpath (param "HOME_DIR")))`,
+		`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.claude")))`,
+		`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.local")))`,
+		`(allow file-read* (literal (string-append (param "HOME_DIR") "/.gitconfig")))`,
 		`(allow file-read* (subpath (param "WORKING_DIR")))`,
 		`(allow file-write* (subpath (param "WORKING_DIR")))`,
 		`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))`,
@@ -152,8 +154,8 @@ func TestBuildAutoResolvesHomeDir(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(profile, `(allow file-read* (subpath (param "HOME_DIR")))`) {
-		t.Error("profile should contain HOME_DIR read rule")
+	if !strings.Contains(profile, `(allow file-read* (subpath (string-append (param "HOME_DIR") "/.claude")))`) {
+		t.Error("profile should contain HOME_DIR/.claude read rule")
 	}
 	if !strings.Contains(profile, `(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))`) {
 		t.Error("profile should contain HOME_DIR write rule for claude config")

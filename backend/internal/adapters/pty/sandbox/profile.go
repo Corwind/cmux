@@ -104,9 +104,19 @@ func buildProfile(templateFragments []string) string {
 	b.WriteString(`(allow file-read* (subpath "/private"))` + "\n")
 	b.WriteString(`(allow file-read* (subpath "/dev"))` + "\n")
 
-	// Home directory (read-only — write restricted to specific subdirs below)
-	b.WriteString("\n;; home directory (read-only)\n")
-	b.WriteString(`(allow file-read* (subpath (param "HOME_DIR")))` + "\n")
+	// Home directory — only specific subdirs needed by Claude Code and its toolchain
+	b.WriteString("\n;; home directory (selective read-only)\n")
+	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.claude")))` + "\n")
+	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.config")))` + "\n")
+	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.local")))` + "\n")
+	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.npm")))` + "\n")
+	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.nvm")))` + "\n")
+	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.gitconfig")))` + "\n")
+	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.profile")))` + "\n")
+	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.bashrc")))` + "\n")
+	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.zshrc")))` + "\n")
+	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.zshenv")))` + "\n")
+	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.zprofile")))` + "\n")
 
 	// Working directory (read)
 	b.WriteString("\n;; working directory (read)\n")
