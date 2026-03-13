@@ -106,6 +106,7 @@ func buildProfile(templateFragments []string) string {
 
 	// Home directory — only specific subdirs needed by Claude Code and its toolchain
 	b.WriteString("\n;; home directory (selective read-only)\n")
+	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.claude.json")))` + "\n")
 	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.claude")))` + "\n")
 	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.config")))` + "\n")
 	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.local")))` + "\n")
@@ -136,8 +137,9 @@ func buildProfile(templateFragments []string) string {
 	b.WriteString("\n;; working directory (write)\n")
 	b.WriteString(`(allow file-write* (subpath (param "WORKING_DIR")))` + "\n")
 
-	// Claude Code config — ~/.claude and ~/.config (write)
+	// Claude Code config — ~/.claude, ~/.claude.json and ~/.config (write)
 	b.WriteString("\n;; claude config (write)\n")
+	b.WriteString(`(allow file-write* (literal (string-append (param "HOME_DIR") "/.claude.json")))` + "\n")
 	b.WriteString(`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))` + "\n")
 	b.WriteString(`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.config")))` + "\n")
 
