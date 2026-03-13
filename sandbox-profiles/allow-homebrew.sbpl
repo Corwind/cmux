@@ -1,0 +1,5 @@
+;; Homebrew read access
+(allow file-read* (subpath "/opt/homebrew"))
+(allow file-read* (subpath "/usr/local/Cellar"))
+(allow file-read* (subpath "/usr/local/bin"))
+(allow file-read* (subpath "/usr/local/lib"))
