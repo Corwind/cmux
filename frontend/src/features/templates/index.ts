@@ -6,6 +6,7 @@ export { useCreateTemplate } from "./hooks/useCreateTemplate";
 export { useUpdateTemplate } from "./hooks/useUpdateTemplate";
 export { useDeleteTemplate } from "./hooks/useDeleteTemplate";
 export type {
+  SandboxRule,
   SandboxTemplate,
   CreateTemplateInput,
   UpdateTemplateInput,

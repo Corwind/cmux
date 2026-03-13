@@ -1,11 +1,11 @@
 import { useState } from "react";
-import type { SandboxTemplate } from "../types";
-import { type SandboxRule, rulesToSbpl, sbplToRules } from "../utils/sbpl";
+import type { SandboxRule, SandboxTemplate } from "../types";
+import { rulesToSbpl } from "../utils/sbpl";
 import { FileBrowser } from "@/features/file-browser";
 
 interface TemplateEditorProps {
   template?: SandboxTemplate;
-  onSave: (name: string, content: string) => void;
+  onSave: (name: string, rules: SandboxRule[]) => void;
   onCancel: () => void;
   isPending: boolean;
   error?: string;
@@ -24,11 +24,9 @@ export function TemplateEditor({
 }: TemplateEditorProps) {
   const [name, setName] = useState(template?.name ?? "");
   const [advanced, setAdvanced] = useState(false);
-  const [rawContent, setRawContent] = useState(template?.content ?? "");
   const [rules, setRules] = useState<SandboxRule[]>(() => {
-    if (template?.content) {
-      const parsed = sbplToRules(template.content);
-      return parsed.length > 0 ? parsed : [emptyRule()];
+    if (template?.rules && template.rules.length > 0) {
+      return template.rules;
     }
     return [emptyRule()];
   });
@@ -40,16 +38,11 @@ export function TemplateEditor({
     e.preventDefault();
     if (!name.trim()) return;
 
-    if (advanced) {
-      if (!rawContent.trim()) return;
-      onSave(name.trim(), rawContent.trim());
-    } else {
-      const validRules = rules.filter(
-        (r) => r.path && (r.read || r.write || r.metadata),
-      );
-      if (validRules.length === 0) return;
-      onSave(name.trim(), rulesToSbpl(validRules));
-    }
+    const validRules = rules.filter(
+      (r) => r.path && (r.read || r.write || r.metadata),
+    );
+    if (validRules.length === 0) return;
+    onSave(name.trim(), validRules);
   }
 
   function updateRule(index: number, update: Partial<SandboxRule>) {
@@ -59,27 +52,18 @@ export function TemplateEditor({
   }
 
   function removeRule(index: number) {
-    setRules((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+    setRules((prev) =>
+      prev.length === 1 ? prev : prev.filter((_, i) => i !== index),
+    );
   }
 
   function addRule() {
     setRules((prev) => [...prev, emptyRule()]);
   }
 
-  function switchToAdvanced() {
-    setRawContent(rulesToSbpl(rules));
-    setAdvanced(true);
-  }
-
-  function switchToBuilder() {
-    const parsed = sbplToRules(rawContent);
-    setRules(parsed.length > 0 ? parsed : [emptyRule()]);
-    setAdvanced(false);
-  }
-
-  const hasValidContent = advanced
-    ? rawContent.trim().length > 0
-    : rules.some((r) => r.path && (r.read || r.write || r.metadata));
+  const hasValidRules = rules.some(
+    (r) => r.path && (r.read || r.write || r.metadata),
+  );
 
   return (
     <>
@@ -106,11 +90,11 @@ export function TemplateEditor({
 
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-gray-400">
-            {advanced ? "SBPL Content" : "Rules"}
+            {advanced ? "SBPL Preview" : "Rules"}
           </span>
           <button
             type="button"
-            onClick={advanced ? switchToBuilder : switchToAdvanced}
+            onClick={() => setAdvanced(!advanced)}
             className="text-xs text-gray-500 hover:text-gray-300"
           >
             {advanced ? "Rule Builder" : "Advanced"}
@@ -119,11 +103,10 @@ export function TemplateEditor({
 
         {advanced ? (
           <textarea
-            value={rawContent}
-            onChange={(e) => setRawContent(e.target.value)}
-            placeholder={'(allow file-read* (subpath "/tmp"))\n...'}
+            value={rulesToSbpl(rules)}
+            readOnly
             rows={12}
-            className="w-full rounded border border-gray-600 bg-gray-900 px-2.5 py-1.5 font-mono text-sm text-white placeholder-gray-500 focus:border-green-500 focus:outline-none"
+            className="w-full rounded border border-gray-600 bg-gray-900 px-2.5 py-1.5 font-mono text-sm text-gray-400 focus:outline-none"
           />
         ) : (
           <div className="space-y-2">
@@ -240,7 +223,7 @@ export function TemplateEditor({
         <div className="flex gap-2">
           <button
             type="submit"
-            disabled={isPending || !name.trim() || !hasValidContent}
+            disabled={isPending || !name.trim() || !hasValidRules}
             className="flex-1 rounded bg-green-600 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-500 disabled:opacity-50"
           >
             {isPending ? "Saving..." : "Save"}

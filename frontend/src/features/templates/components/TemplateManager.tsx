@@ -12,7 +12,7 @@ import {
 import { templateKeys } from "../hooks/useTemplates";
 import { useQueryClient } from "@tanstack/react-query";
 import { TemplateEditor } from "./TemplateEditor";
-import type { SandboxTemplate } from "../types";
+import type { SandboxRule, SandboxTemplate } from "../types";
 
 type EditorMode =
   | { kind: "closed" }
@@ -28,10 +28,10 @@ export function TemplateManager() {
   const [editor, setEditor] = useState<EditorMode>({ kind: "closed" });
   const [error, setError] = useState("");
 
-  function handleCreate(name: string, content: string) {
+  function handleCreate(name: string, rules: SandboxRule[]) {
     setError("");
     createTemplate.mutate(
-      { name, content },
+      { name, rules },
       {
         onSuccess: () => setEditor({ kind: "closed" }),
         onError: (err) => setError(err.message),
@@ -39,10 +39,10 @@ export function TemplateManager() {
     );
   }
 
-  function handleUpdate(id: string, name: string, content: string) {
+  function handleUpdate(id: string, name: string, rules: SandboxRule[]) {
     setError("");
     updateTemplate.mutate(
-      { id, input: { name, content } },
+      { id, input: { name, rules } },
       {
         onSuccess: () => setEditor({ kind: "closed" }),
         onError: (err) => setError(err.message),
@@ -111,8 +111,8 @@ export function TemplateManager() {
     return (
       <TemplateEditor
         template={editor.template}
-        onSave={(name, content) =>
-          handleUpdate(editor.template.id, name, content)
+        onSave={(name, rules) =>
+          handleUpdate(editor.template.id, name, rules)
         }
         onCancel={() => setEditor({ kind: "closed" })}
         isPending={updateTemplate.isPending}
