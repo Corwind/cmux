@@ -6,6 +6,6 @@ type DirEntry struct {
 }
 
 type FileBrowser interface {
-	ListDir(path string) ([]DirEntry, error)
+	ListDir(path string, showHidden bool) ([]DirEntry, error)
 	HomeDir() (string, error)
 }

@@ -240,6 +240,8 @@ export function TemplateEditor({
 
       {browsingRuleIndex !== null && (
         <FileBrowser
+          showHidden
+          showFiles
           onSelect={(path) => {
             updateRule(browsingRuleIndex, { path });
             setBrowsingRuleIndex(null);
