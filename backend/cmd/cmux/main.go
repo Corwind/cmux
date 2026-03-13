@@ -40,21 +40,18 @@ func main() {
 	// Seed templates from sandbox-profiles directory if none exist
 	seedTemplates(templateService)
 
-	var managerOpts []pty.Option
-	if os.Getenv("CMUX_SANDBOX_ENABLED") == "true" {
-		templateDir := os.Getenv("CMUX_SANDBOX_TEMPLATE_DIR")
-		if templateDir == "" {
-			templateDir = "sandbox-profiles"
-		}
-		builder := sandbox.NewProfileBuilder(templateDir)
-		managerOpts = append(managerOpts, pty.WithSandbox(builder))
-
-		if tmplEnv := os.Getenv("CMUX_SANDBOX_TEMPLATES"); tmplEnv != "" {
-			templates := strings.Split(tmplEnv, ",")
-			managerOpts = append(managerOpts, pty.WithSandboxTemplates(templates...))
-		}
-		log.Printf("sandbox mode enabled (template dir: %s)", templateDir)
+	templateDir := os.Getenv("CMUX_SANDBOX_TEMPLATE_DIR")
+	if templateDir == "" {
+		templateDir = "sandbox-profiles"
 	}
+	builder := sandbox.NewProfileBuilder(templateDir)
+	managerOpts := []pty.Option{pty.WithSandbox(builder)}
+
+	if tmplEnv := os.Getenv("CMUX_SANDBOX_TEMPLATES"); tmplEnv != "" {
+		templates := strings.Split(tmplEnv, ",")
+		managerOpts = append(managerOpts, pty.WithSandboxTemplates(templates...))
+	}
+	log.Printf("sandbox enabled (template dir: %s)", templateDir)
 
 	processManager := pty.NewManager(managerOpts...)
 	fileBrowser := filesystem.NewBrowser()
