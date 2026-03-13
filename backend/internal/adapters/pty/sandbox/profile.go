@@ -79,10 +79,13 @@ func buildProfile(templateFragments []string) string {
 	b.WriteString("\n;; IPC and system\n")
 	b.WriteString("(allow mach-lookup)\n")
 	b.WriteString("(allow sysctl-read)\n")
+	b.WriteString("(allow ipc-posix-shm*)\n")
+	b.WriteString("(allow user-preference-read)\n")
 
 	// Network (Claude Code needs to call Anthropic API)
 	b.WriteString("\n;; network\n")
 	b.WriteString("(allow network-outbound)\n")
+	b.WriteString("(allow network-bind)\n")
 	b.WriteString("(allow system-socket)\n")
 
 	// File metadata everywhere (needed for path resolution, stat, etc.)
@@ -118,6 +121,8 @@ func buildProfile(templateFragments []string) string {
 	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.zshrc")))` + "\n")
 	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.zshenv")))` + "\n")
 	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.zprofile")))` + "\n")
+	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.CFUserTextEncoding")))` + "\n")
+	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/Library/Keychains")))` + "\n")
 
 	// Working directory (read)
 	b.WriteString("\n;; working directory (read)\n")
