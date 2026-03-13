@@ -26,10 +26,17 @@ func TestBuildBasicProfile(t *testing.T) {
 	requiredFragments := []string{
 		"(allow process-exec*)",
 		"(allow process-fork)",
-		"(allow file-read*)",
+		`(allow file-read* (subpath (param "WORKING_DIR")))`,
 		`(allow file-write* (subpath (param "WORKING_DIR")))`,
-		`(allow file-write* (subpath (param "HOME_DIR")))`,
+		`(allow file-write* (home-subpath "/.claude"))`,
+		`(allow file-read* (home-subpath "/.claude"))`,
 		`(allow file-write* (subpath "/dev"))`,
+		`(allow file-read* (subpath "/usr/lib"))`,
+	}
+
+	// Must NOT contain unrestricted file-read
+	if strings.Contains(profile, "(allow file-read*)\n") {
+		t.Error("profile must not contain unrestricted (allow file-read*)")
 	}
 
 	for _, frag := range requiredFragments {
@@ -138,8 +145,8 @@ func TestBuildAutoResolvesHomeDir(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(profile, `(param "HOME_DIR")`) {
-		t.Error("profile should contain HOME_DIR param reference")
+	if !strings.Contains(profile, `(home-subpath "/.claude")`) {
+		t.Error("profile should contain home-subpath for claude config")
 	}
 }
 
