@@ -39,7 +39,7 @@ export function clearDefaultTemplate(): Promise<void> {
 }
 
 export function importTemplate(
-  input: CreateTemplateInput,
+  input: { name: string; content: string },
 ): Promise<SandboxTemplate> {
   return apiClient.post<SandboxTemplate>("/templates/import", input);
 }
