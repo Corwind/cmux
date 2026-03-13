@@ -18,25 +18,40 @@ func NewTemplateHandler(service *app.TemplateService) *TemplateHandler {
 	return &TemplateHandler{service: service}
 }
 
-type createTemplateRequest struct {
-	Name    string `json:"name"`
-	Content string `json:"content"`
+type templateRequest struct {
+	Name    string              `json:"name"`
+	Content string              `json:"content"`
+	Rules   []domain.SandboxRule `json:"rules"`
+}
+
+// resolveContent returns SBPL content from a request, preferring rules over raw content.
+func resolveContent(req templateRequest) string {
+	if len(req.Rules) > 0 {
+		return domain.RulesToSBPL(req.Rules)
+	}
+	return req.Content
 }
 
 type templateResponse struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Content   string `json:"content"`
-	IsDefault bool   `json:"is_default"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID        string               `json:"id"`
+	Name      string               `json:"name"`
+	Content   string               `json:"content"`
+	Rules     []domain.SandboxRule  `json:"rules"`
+	IsDefault bool                 `json:"is_default"`
+	CreatedAt string               `json:"created_at"`
+	UpdatedAt string               `json:"updated_at"`
 }
 
 func toTemplateResponse(t domain.SandboxTemplate) templateResponse {
+	rules := domain.SBPLToRules(t.Content)
+	if rules == nil {
+		rules = []domain.SandboxRule{}
+	}
 	return templateResponse{
 		ID:        t.ID,
 		Name:      t.Name,
 		Content:   t.Content,
+		Rules:     rules,
 		IsDefault: t.IsDefault,
 		CreatedAt: t.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt: t.UpdatedAt.Format("2006-01-02T15:04:05Z"),
@@ -44,13 +59,14 @@ func toTemplateResponse(t domain.SandboxTemplate) templateResponse {
 }
 
 func (h *TemplateHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req createTemplateRequest
+	var req templateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	tmpl, err := h.service.CreateTemplate(r.Context(), req.Name, req.Content)
+	content := resolveContent(req)
+	tmpl, err := h.service.CreateTemplate(r.Context(), req.Name, content)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -97,13 +113,14 @@ func (h *TemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req createTemplateRequest
+	var req templateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	tmpl, err := h.service.UpdateTemplate(r.Context(), id, req.Name, req.Content)
+	content := resolveContent(req)
+	tmpl, err := h.service.UpdateTemplate(r.Context(), id, req.Name, content)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -142,13 +159,14 @@ func (h *TemplateHandler) ClearDefault(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TemplateHandler) Import(w http.ResponseWriter, r *http.Request) {
-	var req createTemplateRequest
+	var req templateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	tmpl, err := h.service.ImportTemplate(r.Context(), req.Name, req.Content)
+	content := resolveContent(req)
+	tmpl, err := h.service.ImportTemplate(r.Context(), req.Name, content)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
