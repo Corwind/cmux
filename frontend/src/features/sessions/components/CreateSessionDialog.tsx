@@ -9,6 +9,7 @@ export function CreateSessionDialog() {
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState("");
   const [templateId, setTemplateId] = useState("");
+  const [skipPermissions, setSkipPermissions] = useState(false);
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const handleTemplateChange = useCallback((id: string) => setTemplateId(id), []);
   const createSession = useCreateSession();
@@ -18,7 +19,7 @@ export function CreateSessionDialog() {
     e.preventDefault();
     if (!directory.trim()) return;
 
-    const input: { name?: string; working_dir: string; template_id?: string } = {
+    const input: { name?: string; working_dir: string; template_id?: string; skip_permissions?: boolean } = {
       working_dir: directory.trim(),
     };
     if (name.trim()) {
@@ -27,6 +28,9 @@ export function CreateSessionDialog() {
     if (templateId) {
       input.template_id = templateId;
     }
+    if (skipPermissions) {
+      input.skip_permissions = true;
+    }
 
     createSession.mutate(input, {
       onSuccess: (session) => {
@@ -34,6 +38,7 @@ export function CreateSessionDialog() {
         setName("");
         setDirectory("");
         setTemplateId("");
+        setSkipPermissions(false);
         setIsOpen(false);
       },
     });
@@ -113,6 +118,15 @@ export function CreateSessionDialog() {
           </div>
         </div>
         <TemplateSelector value={templateId} onChange={handleTemplateChange} />
+        <label className="flex items-center gap-2 text-xs text-gray-400">
+          <input
+            type="checkbox"
+            checked={skipPermissions}
+            onChange={(e) => setSkipPermissions(e.target.checked)}
+            className="rounded border-gray-600 bg-gray-900 text-green-500 focus:ring-green-500"
+          />
+          Skip permissions (--dangerously-skip-permissions)
+        </label>
         <div className="flex gap-2">
           <button
             type="submit"

@@ -25,7 +25,7 @@ func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, te
 	}
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, name, workingDir, templateID string) (domain.Session, error) {
+func (s *SessionService) CreateSession(ctx context.Context, name, workingDir, templateID string, skipPermissions bool) (domain.Session, error) {
 	session, err := domain.NewSession(name, workingDir)
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
@@ -34,7 +34,11 @@ func (s *SessionService) CreateSession(ctx context.Context, name, workingDir, te
 	// Resolve sandbox template content
 	s.applySandboxContent(ctx, templateID)
 
-	handle, err := s.processManager.Spawn(ctx, workingDir, "--session-id", session.ClaudeSessionID)
+	args := []string{"--session-id", session.ClaudeSessionID}
+	if skipPermissions {
+		args = append(args, "--dangerously-skip-permissions")
+	}
+	handle, err := s.processManager.Spawn(ctx, workingDir, args...)
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("failed to spawn process: %w", err)
 	}

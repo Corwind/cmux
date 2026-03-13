@@ -157,7 +157,7 @@ func TestSessionHandler_Create_EmptyNameDefaultsToDir(t *testing.T) {
 func TestSessionHandler_List(t *testing.T) {
 	handler, svc := setupHandler()
 
-	if _, err := svc.CreateSession(context.Background(), "s1", "/tmp", ""); err != nil {
+	if _, err := svc.CreateSession(context.Background(), "s1", "/tmp", "", false); err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
 
@@ -182,7 +182,7 @@ func TestSessionHandler_List(t *testing.T) {
 func TestSessionHandler_Get(t *testing.T) {
 	handler, svc := setupHandler()
 
-	created, _ := svc.CreateSession(context.Background(), "test", "/tmp", "")
+	created, _ := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
 
 	// chi URL params require a chi context
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+created.ID, nil)
@@ -225,7 +225,7 @@ func TestSessionHandler_Get_NotFound(t *testing.T) {
 func TestSessionHandler_Delete(t *testing.T) {
 	handler, svc := setupHandler()
 
-	created, _ := svc.CreateSession(context.Background(), "test", "/tmp", "")
+	created, _ := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+created.ID, nil)
 	rctx := chi.NewRouteContext()
