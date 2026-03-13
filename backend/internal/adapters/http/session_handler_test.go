@@ -89,7 +89,7 @@ func (m *mockPM) GetHandle(pid int) (*ports.PTYHandle, bool) { h, ok := m.handle
 func setupHandler() (*SessionHandler, *app.SessionService) {
 	repo := newMockRepo()
 	pm := newMockPM()
-	svc := app.NewSessionService(repo, pm)
+	svc := app.NewSessionService(repo, pm, nil)
 	handler := NewSessionHandler(svc)
 	return handler, svc
 }
@@ -157,7 +157,7 @@ func TestSessionHandler_Create_EmptyNameDefaultsToDir(t *testing.T) {
 func TestSessionHandler_List(t *testing.T) {
 	handler, svc := setupHandler()
 
-	if _, err := svc.CreateSession(context.Background(), "s1", "/tmp"); err != nil {
+	if _, err := svc.CreateSession(context.Background(), "s1", "/tmp", ""); err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
 
@@ -182,7 +182,7 @@ func TestSessionHandler_List(t *testing.T) {
 func TestSessionHandler_Get(t *testing.T) {
 	handler, svc := setupHandler()
 
-	created, _ := svc.CreateSession(context.Background(), "test", "/tmp")
+	created, _ := svc.CreateSession(context.Background(), "test", "/tmp", "")
 
 	// chi URL params require a chi context
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+created.ID, nil)
@@ -225,7 +225,7 @@ func TestSessionHandler_Get_NotFound(t *testing.T) {
 func TestSessionHandler_Delete(t *testing.T) {
 	handler, svc := setupHandler()
 
-	created, _ := svc.CreateSession(context.Background(), "test", "/tmp")
+	created, _ := svc.CreateSession(context.Background(), "test", "/tmp", "")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+created.ID, nil)
 	rctx := chi.NewRouteContext()

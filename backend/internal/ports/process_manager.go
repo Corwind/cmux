@@ -19,3 +19,9 @@ type ProcessManager interface {
 	IsAlive(pid int) bool
 	GetHandle(pid int) (*PTYHandle, bool)
 }
+
+// SandboxContentProvider allows setting raw SBPL content strings
+// to be used when building the sandbox profile for the next spawn.
+type SandboxContentProvider interface {
+	SetSandboxContent(contents []string)
+}

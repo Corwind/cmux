@@ -34,6 +34,12 @@ func main() {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
 
+	templateRepo := sqlite.NewTemplateRepository(repo.DB())
+	templateService := appservice.NewTemplateService(templateRepo)
+
+	// Seed templates from sandbox-profiles directory if none exist
+	seedTemplates(templateService)
+
 	var managerOpts []pty.Option
 	if os.Getenv("CMUX_SANDBOX_ENABLED") == "true" {
 		templateDir := os.Getenv("CMUX_SANDBOX_TEMPLATE_DIR")
@@ -52,9 +58,9 @@ func main() {
 
 	processManager := pty.NewManager(managerOpts...)
 	fileBrowser := filesystem.NewBrowser()
-	sessionService := appservice.NewSessionService(repo, processManager)
+	sessionService := appservice.NewSessionService(repo, processManager, templateRepo)
 
-	router := httpadapter.NewRouter(sessionService, fileBrowser)
+	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser)
 
 	addr := fmt.Sprintf(":%s", port)
 	server := &http.Server{
@@ -88,4 +94,63 @@ func main() {
 	_ = repo.Close()
 
 	log.Printf("cmux stopped")
+}
+
+func seedTemplates(svc *appservice.TemplateService) {
+	ctx := context.Background()
+	templates, err := svc.ListTemplates(ctx)
+	if err != nil {
+		log.Printf("failed to list templates for seeding: %v", err)
+		return
+	}
+	if len(templates) > 0 {
+		return
+	}
+
+	profileDir := os.Getenv("CMUX_SANDBOX_TEMPLATE_DIR")
+	if profileDir == "" {
+		profileDir = "sandbox-profiles"
+	}
+
+	entries, err := os.ReadDir(profileDir)
+	if err != nil {
+		log.Printf("no sandbox-profiles directory found, skipping template seeding")
+		return
+	}
+
+	var allContent []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sbpl") {
+			continue
+		}
+		data, err := os.ReadFile(fmt.Sprintf("%s/%s", profileDir, entry.Name()))
+		if err != nil {
+			log.Printf("failed to read %s: %v", entry.Name(), err)
+			continue
+		}
+		content := string(data)
+		name := strings.TrimSuffix(entry.Name(), ".sbpl")
+
+		if _, err := svc.CreateTemplate(ctx, name, content); err != nil {
+			log.Printf("failed to seed template %s: %v", name, err)
+			continue
+		}
+		allContent = append(allContent, content)
+		log.Printf("seeded template: %s", name)
+	}
+
+	// Create a combined "Standard" template and set as default
+	if len(allContent) > 0 {
+		combined := strings.Join(allContent, "\n\n")
+		tmpl, err := svc.CreateTemplate(ctx, "Standard", combined)
+		if err != nil {
+			log.Printf("failed to create Standard template: %v", err)
+			return
+		}
+		if err := svc.SetDefault(ctx, tmpl.ID); err != nil {
+			log.Printf("failed to set Standard as default: %v", err)
+		} else {
+			log.Printf("set Standard template as default")
+		}
+	}
 }

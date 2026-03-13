@@ -82,6 +82,10 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *Repository) DB() *sql.DB {
+	return r.db
+}
+
 func (r *Repository) Close() error {
 	return r.db.Close()
 }

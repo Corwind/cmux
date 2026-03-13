@@ -53,6 +53,7 @@ type Manager struct {
 	fixedArgs        []string
 	sandboxBuilder   *sandbox.ProfileBuilder
 	sandboxTemplates []string
+	sandboxContent   []string
 }
 
 func NewManager(opts ...Option) *Manager {
@@ -194,13 +195,34 @@ func (m *Manager) GetHandle(pid int) (*ports.PTYHandle, bool) {
 	return proc.handle, true
 }
 
+// SetSandboxContent sets raw SBPL content strings to use for the next spawn.
+// The content is cleared after use.
+func (m *Manager) SetSandboxContent(contents []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sandboxContent = contents
+}
+
 func (m *Manager) buildSandboxCommand(workingDir string, originalArgs []string) (*exec.Cmd, error) {
 	cfg := sandbox.ProfileConfig{
 		WorkingDir:    workingDir,
 		TemplateNames: m.sandboxTemplates,
 	}
 
-	profile, err := m.sandboxBuilder.Build(cfg)
+	var profile string
+	var err error
+
+	// Use sandboxContent if set, otherwise use template names from files
+	m.mu.Lock()
+	content := m.sandboxContent
+	m.sandboxContent = nil
+	m.mu.Unlock()
+
+	if len(content) > 0 {
+		profile, err = m.sandboxBuilder.BuildWithContent(cfg, content)
+	} else {
+		profile, err = m.sandboxBuilder.Build(cfg)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("build sandbox profile: %w", err)
 	}

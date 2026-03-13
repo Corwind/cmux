@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/cors"
 )
 
-func NewRouter(sessionService *app.SessionService, fileBrowser ports.FileBrowser) http.Handler {
+func NewRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -23,6 +23,7 @@ func NewRouter(sessionService *app.SessionService, fileBrowser ports.FileBrowser
 	}))
 
 	sessionHandler := NewSessionHandler(sessionService)
+	templateHandler := NewTemplateHandler(templateService)
 	fsHandler := NewFilesystemHandler(fileBrowser)
 	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"localhost:5173", "localhost:3001"}))
 
@@ -32,6 +33,17 @@ func NewRouter(sessionService *app.SessionService, fileBrowser ports.FileBrowser
 		r.Get("/sessions/{id}", sessionHandler.Get)
 		r.Post("/sessions/{id}/resume", sessionHandler.Resume)
 		r.Delete("/sessions/{id}", sessionHandler.Delete)
+
+		r.Get("/templates", templateHandler.List)
+		r.Post("/templates", templateHandler.Create)
+		r.Post("/templates/import", templateHandler.Import)
+		r.Delete("/templates/default", templateHandler.ClearDefault)
+		r.Get("/templates/{id}", templateHandler.Get)
+		r.Put("/templates/{id}", templateHandler.Update)
+		r.Delete("/templates/{id}", templateHandler.Delete)
+		r.Post("/templates/{id}/default", templateHandler.SetDefault)
+		r.Get("/templates/{id}/export", templateHandler.Export)
+
 		r.Get("/fs", fsHandler.ListDirectory)
 	})
 
@@ -41,7 +53,7 @@ func NewRouter(sessionService *app.SessionService, fileBrowser ports.FileBrowser
 }
 
 // NewTestRouter creates a router with permissive WebSocket origin patterns for testing.
-func NewTestRouter(sessionService *app.SessionService, fileBrowser ports.FileBrowser) http.Handler {
+func NewTestRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -54,6 +66,7 @@ func NewTestRouter(sessionService *app.SessionService, fileBrowser ports.FileBro
 	}))
 
 	sessionHandler := NewSessionHandler(sessionService)
+	templateHandler := NewTemplateHandler(templateService)
 	fsHandler := NewFilesystemHandler(fileBrowser)
 	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}))
 
@@ -63,6 +76,17 @@ func NewTestRouter(sessionService *app.SessionService, fileBrowser ports.FileBro
 		r.Get("/sessions/{id}", sessionHandler.Get)
 		r.Post("/sessions/{id}/resume", sessionHandler.Resume)
 		r.Delete("/sessions/{id}", sessionHandler.Delete)
+
+		r.Get("/templates", templateHandler.List)
+		r.Post("/templates", templateHandler.Create)
+		r.Post("/templates/import", templateHandler.Import)
+		r.Delete("/templates/default", templateHandler.ClearDefault)
+		r.Get("/templates/{id}", templateHandler.Get)
+		r.Put("/templates/{id}", templateHandler.Update)
+		r.Delete("/templates/{id}", templateHandler.Delete)
+		r.Post("/templates/{id}/default", templateHandler.SetDefault)
+		r.Get("/templates/{id}/export", templateHandler.Export)
+
 		r.Get("/fs", fsHandler.ListDirectory)
 	})
 

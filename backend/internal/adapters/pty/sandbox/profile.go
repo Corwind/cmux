@@ -100,6 +100,43 @@ func basePermissions() []string {
 	}
 }
 
+// BuildWithContent assembles a complete SBPL profile string from the base rules,
+// working directory permissions, and raw template content strings (instead of loading from files).
+func (pb *ProfileBuilder) BuildWithContent(cfg ProfileConfig, templateContents []string) (string, error) {
+	var b strings.Builder
+
+	b.WriteString("(version 1)\n")
+	b.WriteString("(deny default)\n")
+
+	b.WriteString("\n;; base permissions\n")
+	for _, rule := range basePermissions() {
+		b.WriteString(rule + "\n")
+	}
+
+	b.WriteString("\n;; read access (unrestricted - sandbox focuses on write containment)\n")
+	b.WriteString("(allow file-read*)\n")
+	b.WriteString("(allow file-read-metadata)\n")
+
+	b.WriteString("\n;; device write access\n")
+	b.WriteString(`(allow file-write* (subpath "/dev"))` + "\n")
+
+	b.WriteString("\n;; working directory\n")
+	b.WriteString(`(allow file-write* (subpath (param "WORKING_DIR")))` + "\n")
+
+	b.WriteString("\n;; home directory config\n")
+	b.WriteString(`(allow file-write* (subpath (param "HOME_DIR")))` + "\n")
+
+	for i, content := range templateContents {
+		if err := validateTemplate(content); err != nil {
+			return "", fmt.Errorf("build profile: template content %d: %w", i, err)
+		}
+		b.WriteString("\n;; inline template\n")
+		b.WriteString(strings.TrimSpace(content) + "\n")
+	}
+
+	return b.String(), nil
+}
+
 // validateTemplateName ensures the template name is safe to embed in a profile comment.
 // It rejects names containing newlines or other characters that could inject SBPL directives.
 func validateTemplateName(name string) error {

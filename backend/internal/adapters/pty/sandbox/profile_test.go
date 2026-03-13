@@ -173,3 +173,69 @@ func TestBuildRejectsTemplateNameWithPathTraversal(t *testing.T) {
 	}
 }
 
+func TestBuildWithContent(t *testing.T) {
+	pb := NewProfileBuilder(testdataDir(t))
+
+	cfg := ProfileConfig{
+		WorkingDir: "/tmp/project",
+		HomeDir:    "/Users/testuser",
+	}
+
+	contents := []string{
+		`(allow file-write* (subpath "/opt/tools"))`,
+		`(allow network-outbound (remote tcp "*:443"))`,
+	}
+
+	profile, err := pb.BuildWithContent(cfg, contents)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.HasPrefix(profile, "(version 1)\n(deny default)") {
+		t.Error("profile must start with (version 1) and (deny default)")
+	}
+
+	if !strings.Contains(profile, `(subpath "/opt/tools")`) {
+		t.Error("profile missing first template content")
+	}
+	if !strings.Contains(profile, `(remote tcp "*:443")`) {
+		t.Error("profile missing second template content")
+	}
+}
+
+func TestBuildWithContentRejectsInvalid(t *testing.T) {
+	pb := NewProfileBuilder(testdataDir(t))
+
+	cfg := ProfileConfig{
+		WorkingDir: "/tmp/project",
+		HomeDir:    "/Users/testuser",
+	}
+
+	contents := []string{
+		"(version 1)\n(allow file-read*)",
+	}
+
+	_, err := pb.BuildWithContent(cfg, contents)
+	if err == nil {
+		t.Fatal("expected error for content with version directive")
+	}
+}
+
+func TestBuildWithContentEmpty(t *testing.T) {
+	pb := NewProfileBuilder(testdataDir(t))
+
+	cfg := ProfileConfig{
+		WorkingDir: "/tmp/project",
+		HomeDir:    "/Users/testuser",
+	}
+
+	profile, err := pb.BuildWithContent(cfg, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(profile, "(allow process-exec*)") {
+		t.Error("profile missing base permissions")
+	}
+}
+
