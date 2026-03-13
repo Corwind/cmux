@@ -154,8 +154,12 @@ func TestTemplateService_ListTemplates(t *testing.T) {
 	svc := NewTemplateService(repo)
 	ctx := context.Background()
 
-	svc.CreateTemplate(ctx, "t1", "(allow file-read*)")
-	svc.CreateTemplate(ctx, "t2", "(allow file-write*)")
+	if _, err := svc.CreateTemplate(ctx, "t1", "(allow file-read*)"); err != nil {
+		t.Fatalf("CreateTemplate t1 failed: %v", err)
+	}
+	if _, err := svc.CreateTemplate(ctx, "t2", "(allow file-write*)"); err != nil {
+		t.Fatalf("CreateTemplate t2 failed: %v", err)
+	}
 
 	list, err := svc.ListTemplates(ctx)
 	if err != nil {
@@ -236,7 +240,9 @@ func TestTemplateService_ClearDefault(t *testing.T) {
 	ctx := context.Background()
 
 	t1, _ := svc.CreateTemplate(ctx, "t1", "(allow file-read*)")
-	svc.SetDefault(ctx, t1.ID)
+	if err := svc.SetDefault(ctx, t1.ID); err != nil {
+		t.Fatalf("SetDefault failed: %v", err)
+	}
 	if err := svc.ClearDefault(ctx); err != nil {
 		t.Fatalf("ClearDefault failed: %v", err)
 	}
