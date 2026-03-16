@@ -4,6 +4,8 @@ export interface Session {
   working_dir: string;
   status: "running" | "stopped";
   pid: number;
+  template_id: string;
+  skip_permissions: boolean;
   created_at: string;
   updated_at: string;
 }

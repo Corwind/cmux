@@ -6,8 +6,23 @@ import (
 	"net/http"
 
 	"github.com/Corwind/cmux/backend/internal/app"
+	"github.com/Corwind/cmux/backend/internal/domain"
 	"github.com/go-chi/chi/v5"
 )
+
+func toSessionResponse(s domain.Session) sessionResponse {
+	return sessionResponse{
+		ID:              s.ID,
+		Name:            s.Name,
+		WorkingDir:      s.WorkingDir,
+		Status:          string(s.Status),
+		PID:             s.PID,
+		TemplateID:      s.TemplateID,
+		SkipPermissions: s.SkipPermissions,
+		CreatedAt:       s.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:       s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	}
+}
 
 type SessionHandler struct {
 	service *app.SessionService
@@ -25,13 +40,15 @@ type createSessionRequest struct {
 }
 
 type sessionResponse struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	WorkingDir string `json:"working_dir"`
-	Status     string `json:"status"`
-	PID        int    `json:"pid"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	WorkingDir      string `json:"working_dir"`
+	Status          string `json:"status"`
+	PID             int    `json:"pid"`
+	TemplateID      string `json:"template_id"`
+	SkipPermissions bool   `json:"skip_permissions"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -49,15 +66,7 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(sessionResponse{
-		ID:         session.ID,
-		Name:       session.Name,
-		WorkingDir: session.WorkingDir,
-		Status:     string(session.Status),
-		PID:        session.PID,
-		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:  session.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(toSessionResponse(session)); err != nil {
 		log.Printf("failed to encode response: %v", err)
 	}
 }
@@ -71,15 +80,7 @@ func (h *SessionHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	var resp []sessionResponse
 	for _, s := range sessions {
-		resp = append(resp, sessionResponse{
-			ID:         s.ID,
-			Name:       s.Name,
-			WorkingDir: s.WorkingDir,
-			Status:     string(s.Status),
-			PID:        s.PID,
-			CreatedAt:  s.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:  s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-		})
+		resp = append(resp, toSessionResponse(s))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -97,15 +98,7 @@ func (h *SessionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(sessionResponse{
-		ID:         session.ID,
-		Name:       session.Name,
-		WorkingDir: session.WorkingDir,
-		Status:     string(session.Status),
-		PID:        session.PID,
-		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:  session.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(toSessionResponse(session)); err != nil {
 		log.Printf("failed to encode response: %v", err)
 	}
 }
@@ -119,15 +112,7 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(sessionResponse{
-		ID:         session.ID,
-		Name:       session.Name,
-		WorkingDir: session.WorkingDir,
-		Status:     string(session.Status),
-		PID:        session.PID,
-		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:  session.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(toSessionResponse(session)); err != nil {
 		log.Printf("failed to encode response: %v", err)
 	}
 }

@@ -13,6 +13,14 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 `
 
+const addTemplateIDToSessions = `
+ALTER TABLE sessions ADD COLUMN template_id TEXT NOT NULL DEFAULT '';
+`
+
+const addSkipPermissionsToSessions = `
+ALTER TABLE sessions ADD COLUMN skip_permissions INTEGER NOT NULL DEFAULT 0;
+`
+
 const createTemplatesTable = `
 CREATE TABLE IF NOT EXISTS sandbox_templates (
 	id TEXT PRIMARY KEY,
