@@ -16,6 +16,9 @@ dev:
 # Build
 build:
 	cd backend && go build -o bin/cmux ./cmd/cmux
+ifeq ($(shell uname -s),Darwin)
+	codesign --force --options runtime --sign - backend/bin/cmux
+endif
 	cd frontend && npm run build
 
 # Test
