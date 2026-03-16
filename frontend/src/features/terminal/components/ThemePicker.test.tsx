@@ -9,30 +9,34 @@ describe("ThemePicker", () => {
     useTerminalThemeStore.setState({ themeId: DEFAULT_THEME_ID });
   });
 
-  it("renders a select with all themes", () => {
+  it("renders a button for each theme", () => {
     render(<ThemePicker />);
-    const select = screen.getByLabelText("Terminal Theme") as HTMLSelectElement;
-    expect(select).toBeDefined();
-    expect(select.options.length).toBe(terminalThemes.length);
+    for (const t of terminalThemes) {
+      expect(screen.getByText(t.name)).toBeDefined();
+    }
   });
 
-  it("shows the current theme as selected", () => {
+  it("highlights the active theme", () => {
     render(<ThemePicker />);
-    const select = screen.getByLabelText("Terminal Theme") as HTMLSelectElement;
-    expect(select.value).toBe(DEFAULT_THEME_ID);
+    const activeButton = screen.getByText("Tokyo Night").closest("button")!;
+    expect(activeButton.style.border).toContain("var(--cmux-accent)");
   });
 
-  it("updates the store when a new theme is selected", () => {
+  it("updates the store when a theme is clicked", () => {
     render(<ThemePicker />);
-    const select = screen.getByLabelText("Terminal Theme") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "dracula" } });
+    const draculaButton = screen.getByText("Dracula").closest("button")!;
+    fireEvent.click(draculaButton);
     expect(useTerminalThemeStore.getState().themeId).toBe("dracula");
   });
 
-  it("renders a color swatch matching the selected theme background", () => {
-    render(<ThemePicker />);
-    const swatch = screen.getByTitle("Theme preview");
-    // jsdom converts hex to rgb, so just check it has a background set
-    expect(swatch.style.background).toBeTruthy();
+  it("renders color strips with multiple color segments", () => {
+    const { container } = render(<ThemePicker />);
+    // Each theme should have a color strip with 8 color segments
+    const strips = container.querySelectorAll(".flex.h-3");
+    expect(strips.length).toBe(terminalThemes.length);
+    // Each strip should have 8 color cells (bg, fg, red, green, yellow, blue, magenta, cyan)
+    for (const strip of strips) {
+      expect(strip.children.length).toBe(8);
+    }
   });
 });

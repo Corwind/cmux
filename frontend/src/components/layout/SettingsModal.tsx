@@ -32,11 +32,16 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   return (
     <dialog
       ref={dialogRef}
-      className="w-full max-w-md rounded-lg p-0 backdrop:bg-black/50"
+      className="m-0 mb-3 ml-3 w-full max-w-sm rounded-lg p-0 backdrop:bg-black/50"
       style={{
         backgroundColor: "var(--cmux-sidebar)",
         border: "1px solid var(--cmux-border-light)",
         color: "var(--cmux-text)",
+        position: "fixed",
+        bottom: "0",
+        left: "0",
+        top: "auto",
+        right: "auto",
       }}
       onClick={(e) => {
         if (e.target === dialogRef.current) onClose();

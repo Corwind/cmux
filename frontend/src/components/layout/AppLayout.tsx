@@ -69,30 +69,30 @@ export function AppLayout({ sidebar, children }: AppLayoutProps) {
           {sidebar}
         </div>
         <div
-          className="flex items-center px-3 py-2"
+          className="flex items-center px-3 py-2.5"
           style={{ borderTop: "1px solid var(--cmux-border)" }}
         >
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
             className="rounded p-1.5 transition-colors"
-            style={{ color: "var(--cmux-text-muted)" }}
+            style={{ color: "var(--cmux-text-secondary)" }}
             title="Settings"
             onMouseEnter={(e) => {
               e.currentTarget.style.color = "var(--cmux-text)";
               e.currentTarget.style.backgroundColor = "var(--cmux-surface-hover)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "var(--cmux-text-muted)";
+              e.currentTarget.style.color = "var(--cmux-text-secondary)";
               e.currentTarget.style.backgroundColor = "";
             }}
           >
             <svg
-              className="h-4 w-4"
+              className="h-5 w-5"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
-              strokeWidth={2}
+              strokeWidth={1.5}
             >
               <path
                 strokeLinecap="round"
