@@ -85,6 +85,7 @@ func buildProfile(templateFragments []string) string {
 	// Network (Claude Code needs to call Anthropic API)
 	b.WriteString("\n;; network\n")
 	b.WriteString("(allow network-outbound)\n")
+	b.WriteString("(allow network-inbound)\n")
 	b.WriteString("(allow network-bind)\n")
 	b.WriteString("(allow system-socket)\n")
 

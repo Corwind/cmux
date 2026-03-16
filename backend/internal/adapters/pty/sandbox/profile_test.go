@@ -38,6 +38,10 @@ func TestBuildBasicProfile(t *testing.T) {
 		`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))`,
 		`(allow file-write* (subpath "/dev"))`,
 		`(allow file-write* (subpath "/tmp"))`,
+		"(allow network-outbound)",
+		"(allow network-inbound)",
+		"(allow network-bind)",
+		"(allow system-socket)",
 	}
 
 	for _, frag := range requiredFragments {
