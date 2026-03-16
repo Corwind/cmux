@@ -49,7 +49,14 @@ export function CreateSessionDialog() {
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="flex w-full items-center justify-center gap-1.5 rounded bg-green-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-green-500"
+        className="flex w-full items-center justify-center gap-1.5 rounded px-3 py-2 text-sm font-medium text-white transition-colors"
+        style={{ backgroundColor: "var(--cmux-accent-button)" }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = "var(--cmux-accent-button-hover)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = "var(--cmux-accent-button)";
+        }}
       >
         <svg
           className="h-4 w-4"
@@ -73,14 +80,19 @@ export function CreateSessionDialog() {
     <>
       <form
         onSubmit={handleSubmit}
-        className="space-y-3 rounded-lg border border-gray-700 bg-gray-800 p-3"
+        className="space-y-3 rounded-lg p-3"
+        style={{
+          backgroundColor: "var(--cmux-surface)",
+          border: "1px solid var(--cmux-border-light)",
+        }}
       >
         <div>
           <label
             htmlFor="session-name"
-            className="mb-1 block text-xs font-medium text-gray-400"
+            className="mb-1 block text-xs font-medium"
+            style={{ color: "var(--cmux-text-muted)" }}
           >
-            Name <span className="text-gray-500">(optional)</span>
+            Name <span style={{ color: "var(--cmux-text-faint)" }}>(optional)</span>
           </label>
           <input
             id="session-name"
@@ -88,13 +100,19 @@ export function CreateSessionDialog() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="defaults to directory name"
-            className="w-full rounded border border-gray-600 bg-gray-900 px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-green-500 focus:outline-none"
+            className="w-full rounded px-2.5 py-1.5 text-sm outline-none"
+            style={{
+              backgroundColor: "var(--cmux-sidebar)",
+              border: "1px solid var(--cmux-border-light)",
+              color: "var(--cmux-text)",
+            }}
           />
         </div>
         <div>
           <label
             htmlFor="session-dir"
-            className="mb-1 block text-xs font-medium text-gray-400"
+            className="mb-1 block text-xs font-medium"
+            style={{ color: "var(--cmux-text-muted)" }}
           >
             Directory
           </label>
@@ -105,12 +123,21 @@ export function CreateSessionDialog() {
               value={directory}
               onChange={(e) => setDirectory(e.target.value)}
               placeholder="/home/user/project"
-              className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-900 px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-green-500 focus:outline-none"
+              className="min-w-0 flex-1 rounded px-2.5 py-1.5 text-sm outline-none"
+              style={{
+                backgroundColor: "var(--cmux-sidebar)",
+                border: "1px solid var(--cmux-border-light)",
+                color: "var(--cmux-text)",
+              }}
             />
             <button
               type="button"
               onClick={() => setShowFileBrowser(true)}
-              className="rounded border border-gray-600 px-2 py-1.5 text-sm text-gray-400 hover:bg-gray-700 hover:text-white"
+              className="rounded px-2 py-1.5 text-sm transition-colors"
+              style={{
+                border: "1px solid var(--cmux-border-light)",
+                color: "var(--cmux-text-muted)",
+              }}
               title="Browse directories"
             >
               ...
@@ -118,12 +145,15 @@ export function CreateSessionDialog() {
           </div>
         </div>
         <TemplateSelector value={templateId} onChange={handleTemplateChange} />
-        <label className="flex items-center gap-2 text-xs text-gray-400">
+        <label
+          className="flex items-center gap-2 text-xs"
+          style={{ color: "var(--cmux-text-muted)" }}
+        >
           <input
             type="checkbox"
             checked={skipPermissions}
             onChange={(e) => setSkipPermissions(e.target.checked)}
-            className="rounded border-gray-600 bg-gray-900 text-green-500 focus:ring-green-500"
+            className="accent-green-500"
           />
           Skip permissions (--dangerously-skip-permissions)
         </label>
@@ -131,14 +161,19 @@ export function CreateSessionDialog() {
           <button
             type="submit"
             disabled={createSession.isPending || !directory.trim()}
-            className="flex-1 rounded bg-green-600 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-500 disabled:opacity-50"
+            className="flex-1 rounded py-1.5 text-sm font-medium text-white transition-colors disabled:opacity-50"
+            style={{ backgroundColor: "var(--cmux-accent-button)" }}
           >
             {createSession.isPending ? "Creating..." : "Create"}
           </button>
           <button
             type="button"
             onClick={() => setIsOpen(false)}
-            className="rounded border border-gray-600 px-3 py-1.5 text-sm text-gray-400 transition-colors hover:text-white"
+            className="rounded px-3 py-1.5 text-sm transition-colors"
+            style={{
+              border: "1px solid var(--cmux-border-light)",
+              color: "var(--cmux-text-muted)",
+            }}
           >
             Cancel
           </button>

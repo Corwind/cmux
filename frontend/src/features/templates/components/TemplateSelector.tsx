@@ -22,15 +22,22 @@ export function TemplateSelector({ value, onChange }: TemplateSelectorProps) {
     <div>
       <label
         htmlFor="template-select"
-        className="mb-1 block text-xs font-medium text-gray-400"
+        className="mb-1 block text-xs font-medium"
+        style={{ color: "var(--cmux-text-muted)" }}
       >
-        Sandbox Template <span className="text-gray-500">(optional)</span>
+        Sandbox Template{" "}
+        <span style={{ color: "var(--cmux-text-faint)" }}>(optional)</span>
       </label>
       <select
         id="template-select"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded border border-gray-600 bg-gray-900 px-2.5 py-1.5 text-sm text-white focus:border-green-500 focus:outline-none"
+        className="w-full rounded px-2.5 py-1.5 text-sm outline-none"
+        style={{
+          backgroundColor: "var(--cmux-sidebar)",
+          border: "1px solid var(--cmux-border-light)",
+          color: "var(--cmux-text)",
+        }}
       >
         <option value="">None</option>
         {templates?.map((template) => (

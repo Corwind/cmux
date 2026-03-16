@@ -69,12 +69,17 @@ export function TemplateEditor({
     <>
       <form
         onSubmit={handleSubmit}
-        className="space-y-3 rounded-lg border border-gray-700 bg-gray-800 p-3"
+        className="space-y-3 rounded-lg p-3"
+        style={{
+          backgroundColor: "var(--cmux-surface)",
+          border: "1px solid var(--cmux-border-light)",
+        }}
       >
         <div>
           <label
             htmlFor="template-name"
-            className="mb-1 block text-xs font-medium text-gray-400"
+            className="mb-1 block text-xs font-medium"
+            style={{ color: "var(--cmux-text-muted)" }}
           >
             Name
           </label>
@@ -84,18 +89,27 @@ export function TemplateEditor({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="my-sandbox-profile"
-            className="w-full rounded border border-gray-600 bg-gray-900 px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-green-500 focus:outline-none"
+            className="w-full rounded px-2.5 py-1.5 text-sm outline-none"
+            style={{
+              backgroundColor: "var(--cmux-sidebar)",
+              border: "1px solid var(--cmux-border-light)",
+              color: "var(--cmux-text)",
+            }}
           />
         </div>
 
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-gray-400">
+          <span
+            className="text-xs font-medium"
+            style={{ color: "var(--cmux-text-muted)" }}
+          >
             {advanced ? "SBPL Preview" : "Rules"}
           </span>
           <button
             type="button"
             onClick={() => setAdvanced(!advanced)}
-            className="text-xs text-gray-500 hover:text-gray-300"
+            className="text-xs"
+            style={{ color: "var(--cmux-text-faint)" }}
           >
             {advanced ? "Rule Builder" : "Advanced"}
           </button>
@@ -106,14 +120,23 @@ export function TemplateEditor({
             value={rulesToSbpl(rules)}
             readOnly
             rows={12}
-            className="w-full rounded border border-gray-600 bg-gray-900 px-2.5 py-1.5 font-mono text-sm text-gray-400 focus:outline-none"
+            className="w-full rounded px-2.5 py-1.5 font-mono text-sm outline-none"
+            style={{
+              backgroundColor: "var(--cmux-sidebar)",
+              border: "1px solid var(--cmux-border-light)",
+              color: "var(--cmux-text-muted)",
+            }}
           />
         ) : (
           <div className="space-y-2">
             {rules.map((rule, index) => (
               <div
                 key={index}
-                className="rounded border border-gray-700 bg-gray-900 p-2.5"
+                className="rounded p-2.5"
+                style={{
+                  backgroundColor: "var(--cmux-sidebar)",
+                  border: "1px solid var(--cmux-border)",
+                }}
               >
                 <div className="flex items-center gap-1.5">
                   <label className="sr-only" htmlFor={`rule-path-${index}`}>
@@ -127,12 +150,21 @@ export function TemplateEditor({
                       updateRule(index, { path: e.target.value })
                     }
                     placeholder="/path/to/allow"
-                    className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-800 px-2 py-1 font-mono text-sm text-white placeholder-gray-500 focus:border-green-500 focus:outline-none"
+                    className="min-w-0 flex-1 rounded px-2 py-1 font-mono text-sm outline-none"
+                    style={{
+                      backgroundColor: "var(--cmux-surface)",
+                      border: "1px solid var(--cmux-border-light)",
+                      color: "var(--cmux-text)",
+                    }}
                   />
                   <button
                     type="button"
                     onClick={() => setBrowsingRuleIndex(index)}
-                    className="rounded border border-gray-600 px-2 py-1 text-sm text-gray-400 hover:bg-gray-700 hover:text-white"
+                    className="rounded px-2 py-1 text-sm transition-colors"
+                    style={{
+                      border: "1px solid var(--cmux-border-light)",
+                      color: "var(--cmux-text-muted)",
+                    }}
                     title="Browse directories"
                   >
                     ...
@@ -140,7 +172,8 @@ export function TemplateEditor({
                   <button
                     type="button"
                     onClick={() => removeRule(index)}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-700 hover:text-red-400"
+                    className="rounded p-1 transition-colors"
+                    style={{ color: "var(--cmux-text-muted)" }}
                     title="Remove rule"
                   >
                     <svg
@@ -159,7 +192,10 @@ export function TemplateEditor({
                   </button>
                 </div>
                 <div className="mt-2 flex gap-4">
-                  <label className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <label
+                    className="flex items-center gap-1.5 text-xs"
+                    style={{ color: "var(--cmux-text-muted)" }}
+                  >
                     <input
                       type="checkbox"
                       checked={rule.read}
@@ -170,7 +206,10 @@ export function TemplateEditor({
                     />
                     Read
                   </label>
-                  <label className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <label
+                    className="flex items-center gap-1.5 text-xs"
+                    style={{ color: "var(--cmux-text-muted)" }}
+                  >
                     <input
                       type="checkbox"
                       checked={rule.write}
@@ -181,7 +220,10 @@ export function TemplateEditor({
                     />
                     Write
                   </label>
-                  <label className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <label
+                    className="flex items-center gap-1.5 text-xs"
+                    style={{ color: "var(--cmux-text-muted)" }}
+                  >
                     <input
                       type="checkbox"
                       checked={rule.metadata}
@@ -198,7 +240,11 @@ export function TemplateEditor({
             <button
               type="button"
               onClick={addRule}
-              className="flex w-full items-center justify-center gap-1 rounded border border-dashed border-gray-600 py-1.5 text-xs text-gray-500 hover:border-gray-500 hover:text-gray-300"
+              className="flex w-full items-center justify-center gap-1 rounded py-1.5 text-xs"
+              style={{
+                border: "1px dashed var(--cmux-border-light)",
+                color: "var(--cmux-text-faint)",
+              }}
             >
               <svg
                 className="h-3 w-3"
@@ -224,14 +270,19 @@ export function TemplateEditor({
           <button
             type="submit"
             disabled={isPending || !name.trim() || !hasValidRules}
-            className="flex-1 rounded bg-green-600 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-500 disabled:opacity-50"
+            className="flex-1 rounded py-1.5 text-sm font-medium text-white transition-colors disabled:opacity-50"
+            style={{ backgroundColor: "var(--cmux-accent-button)" }}
           >
             {isPending ? "Saving..." : "Save"}
           </button>
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-gray-600 px-3 py-1.5 text-sm text-gray-400 transition-colors hover:text-white"
+            className="rounded px-3 py-1.5 text-sm transition-colors"
+            style={{
+              border: "1px solid var(--cmux-border-light)",
+              color: "var(--cmux-text-muted)",
+            }}
           >
             Cancel
           </button>

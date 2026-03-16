@@ -1,5 +1,100 @@
 import type { ITheme } from "@xterm/xterm";
 
+// --- Color utilities ---
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return (
+    "#" +
+    [r, g, b]
+      .map((c) =>
+        Math.round(Math.min(255, Math.max(0, c)))
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")
+  );
+}
+
+/** Mix two hex colors. ratio=0 → color1, ratio=1 → color2. */
+function mix(color1: string, color2: string, ratio: number): string {
+  const [r1, g1, b1] = hexToRgb(color1);
+  const [r2, g2, b2] = hexToRgb(color2);
+  return rgbToHex(
+    r1 + (r2 - r1) * ratio,
+    g1 + (g2 - g1) * ratio,
+    b1 + (b2 - b1) * ratio,
+  );
+}
+
+function lighten(hex: string, amount: number): string {
+  return mix(hex, "#ffffff", amount);
+}
+
+function darken(hex: string, amount: number): string {
+  return mix(hex, "#000000", amount);
+}
+
+// --- UI color derivation ---
+
+export interface UiColors {
+  bg: string;
+  sidebar: string;
+  surface: string;
+  surfaceHover: string;
+  border: string;
+  borderLight: string;
+  text: string;
+  textSecondary: string;
+  textMuted: string;
+  textFaint: string;
+  accent: string;
+  accentHover: string;
+  accentButton: string;
+  accentButtonHover: string;
+  active: string;
+}
+
+export function deriveUiColors(theme: ITheme): UiColors {
+  const bg = theme.background ?? "#1a1b26";
+  const fg = theme.foreground ?? "#c0caf5";
+  const green = (theme.green as string) ?? "#9ece6a";
+  const sel = theme.selectionBackground ?? "#33467c";
+
+  // Boost green vibrancy for text accents (titles, highlights)
+  const accentText = lighten(green, 0.2);
+  // For button backgrounds, use a deeper version for contrast with white text
+  const accentButton = darken(green, 0.3);
+
+  return {
+    bg: darken(bg, 0.2),
+    sidebar: bg,
+    surface: lighten(bg, 0.08),
+    surfaceHover: lighten(bg, 0.14),
+    border: lighten(bg, 0.1),
+    borderLight: lighten(bg, 0.18),
+    text: fg,
+    textSecondary: mix(fg, bg, 0.2),
+    textMuted: mix(fg, bg, 0.45),
+    textFaint: mix(fg, bg, 0.65),
+    accent: accentText,
+    accentHover: lighten(accentText, 0.15),
+    accentButton,
+    accentButtonHover: lighten(accentButton, 0.12),
+    active: sel,
+  };
+}
+
+// --- Theme definitions ---
+
 export interface TerminalTheme {
   id: string;
   name: string;

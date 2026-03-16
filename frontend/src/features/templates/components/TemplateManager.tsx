@@ -127,7 +127,8 @@ export function TemplateManager() {
         <button
           type="button"
           onClick={() => setEditor({ kind: "create" })}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-500"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium text-white transition-colors"
+          style={{ backgroundColor: "var(--cmux-accent-button)" }}
         >
           <svg
             className="h-3.5 w-3.5"
@@ -147,7 +148,11 @@ export function TemplateManager() {
         <button
           type="button"
           onClick={handleImport}
-          className="rounded border border-gray-600 px-3 py-1.5 text-sm text-gray-400 transition-colors hover:text-white"
+          className="rounded px-3 py-1.5 text-sm transition-colors"
+          style={{
+            border: "1px solid var(--cmux-border-light)",
+            color: "var(--cmux-text-muted)",
+          }}
         >
           Import
         </button>
@@ -156,11 +161,15 @@ export function TemplateManager() {
       {error && <p className="text-xs text-red-400">{error}</p>}
 
       {isLoading && (
-        <div className="p-2 text-sm text-gray-500">Loading templates...</div>
+        <div className="p-2 text-sm" style={{ color: "var(--cmux-text-muted)" }}>
+          Loading templates...
+        </div>
       )}
 
       {templates && templates.length === 0 && (
-        <div className="p-2 text-sm text-gray-500">No templates yet.</div>
+        <div className="p-2 text-sm" style={{ color: "var(--cmux-text-muted)" }}>
+          No templates yet.
+        </div>
       )}
 
       {templates && templates.length > 0 && (
@@ -168,12 +177,19 @@ export function TemplateManager() {
           {templates.map((template) => (
             <li
               key={template.id}
-              className="flex items-center justify-between rounded px-3 py-2 text-sm text-gray-300 hover:bg-gray-800"
+              className="flex items-center justify-between rounded px-3 py-2 text-sm"
+              style={{ color: "var(--cmux-text-secondary)" }}
             >
               <div className="min-w-0 flex-1">
                 <span className="truncate font-medium">{template.name}</span>
                 {template.is_default && (
-                  <span className="ml-1.5 rounded bg-green-600/20 px-1.5 py-0.5 text-xs text-green-400">
+                  <span
+                    className="ml-1.5 rounded px-1.5 py-0.5 text-xs"
+                    style={{
+                      backgroundColor: "color-mix(in srgb, var(--cmux-accent) 20%, transparent)",
+                      color: "var(--cmux-accent)",
+                    }}
+                  >
                     default
                   </span>
                 )}
@@ -182,7 +198,8 @@ export function TemplateManager() {
                 <button
                   type="button"
                   onClick={() => handleToggleDefault(template)}
-                  className="rounded p-0.5 text-gray-500 hover:bg-gray-600 hover:text-yellow-400"
+                  className="rounded p-0.5 transition-colors"
+                  style={{ color: "var(--cmux-text-muted)" }}
                   title={
                     template.is_default
                       ? "Clear default"
@@ -206,7 +223,8 @@ export function TemplateManager() {
                 <button
                   type="button"
                   onClick={() => setEditor({ kind: "edit", template })}
-                  className="rounded p-0.5 text-gray-500 hover:bg-gray-600 hover:text-blue-400"
+                  className="rounded p-0.5 transition-colors"
+                  style={{ color: "var(--cmux-text-muted)" }}
                   title="Edit template"
                 >
                   <svg
@@ -226,7 +244,8 @@ export function TemplateManager() {
                 <button
                   type="button"
                   onClick={() => handleExport(template)}
-                  className="rounded p-0.5 text-gray-500 hover:bg-gray-600 hover:text-green-400"
+                  className="rounded p-0.5 transition-colors"
+                  style={{ color: "var(--cmux-text-muted)" }}
                   title="Export template"
                 >
                   <svg
@@ -246,7 +265,8 @@ export function TemplateManager() {
                 <button
                   type="button"
                   onClick={() => deleteTemplateMutation.mutate(template.id)}
-                  className="rounded p-0.5 text-gray-500 hover:bg-gray-600 hover:text-red-400"
+                  className="rounded p-0.5 transition-colors"
+                  style={{ color: "var(--cmux-text-muted)" }}
                   title="Delete template"
                 >
                   <svg

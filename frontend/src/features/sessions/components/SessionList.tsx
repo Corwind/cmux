@@ -1,4 +1,3 @@
-import { cn } from "@/lib/cn";
 import { useSessions } from "../hooks/useSessions";
 import { useDeleteSession } from "../hooks/useDeleteSession";
 import { useResumeSession } from "../hooks/useResumeSession";
@@ -13,13 +12,15 @@ export function SessionList() {
 
   if (isLoading) {
     return (
-      <div className="p-4 text-sm text-gray-500">Loading sessions...</div>
+      <div className="p-4 text-sm" style={{ color: "var(--cmux-text-muted)" }}>
+        Loading sessions...
+      </div>
     );
   }
 
   if (!sessions || sessions.length === 0) {
     return (
-      <div className="p-4 text-sm text-gray-500">
+      <div className="p-4 text-sm" style={{ color: "var(--cmux-text-muted)" }}>
         No sessions yet. Create one to get started.
       </div>
     );
@@ -32,16 +33,37 @@ export function SessionList() {
           <button
             type="button"
             onClick={() => setActiveSession(session.id)}
-            className={cn(
-              "flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors",
-              activeSessionId === session.id
-                ? "bg-gray-700 text-white"
-                : "text-gray-300 hover:bg-gray-800 hover:text-white",
-            )}
+            className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors"
+            style={{
+              backgroundColor:
+                activeSessionId === session.id
+                  ? "var(--cmux-active)"
+                  : undefined,
+              color:
+                activeSessionId === session.id
+                  ? "var(--cmux-text)"
+                  : "var(--cmux-text-secondary)",
+            }}
+            onMouseEnter={(e) => {
+              if (activeSessionId !== session.id) {
+                e.currentTarget.style.backgroundColor =
+                  "var(--cmux-surface-hover)";
+                e.currentTarget.style.color = "var(--cmux-text)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeSessionId !== session.id) {
+                e.currentTarget.style.backgroundColor = "";
+                e.currentTarget.style.color = "var(--cmux-text-secondary)";
+              }
+            }}
           >
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{session.name}</div>
-              <div className="truncate text-xs text-gray-500">
+              <div
+                className="truncate text-xs"
+                style={{ color: "var(--cmux-text-muted)" }}
+              >
                 {session.working_dir}
               </div>
             </div>
@@ -56,8 +78,18 @@ export function SessionList() {
                       onSuccess: () => setActiveSession(session.id),
                     });
                   }}
-                  className="rounded p-0.5 text-gray-500 hover:bg-gray-600 hover:text-green-400"
+                  className="rounded p-0.5 transition-colors"
+                  style={{ color: "var(--cmux-text-muted)" }}
                   title="Resume session"
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor =
+                      "var(--cmux-surface-hover)";
+                    e.currentTarget.style.color = "var(--cmux-accent)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "";
+                    e.currentTarget.style.color = "var(--cmux-text-muted)";
+                  }}
                 >
                   <svg
                     className="h-3.5 w-3.5"
@@ -80,8 +112,18 @@ export function SessionList() {
                   e.stopPropagation();
                   deleteSession.mutate(session.id);
                 }}
-                className="rounded p-0.5 text-gray-500 hover:bg-gray-600 hover:text-red-400"
+                className="rounded p-0.5 transition-colors"
+                style={{ color: "var(--cmux-text-muted)" }}
                 title="Delete session"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor =
+                    "var(--cmux-surface-hover)";
+                  e.currentTarget.style.color = "#f87171";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "";
+                  e.currentTarget.style.color = "var(--cmux-text-muted)";
+                }}
               >
                 <svg
                   className="h-3.5 w-3.5"
