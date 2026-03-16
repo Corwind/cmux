@@ -146,6 +146,41 @@ Every Claude Code session runs inside a macOS `sandbox-exec` jail with **deny-by
 
 The sandbox profile can be extended via templates stored in the `sandbox-profiles/` directory, or by passing custom SBPL rules through the session creation API.
 
+## ⚙️ Configuration
+
+cmux can be configured via a TOML file at `~/.cmux/config.toml`. This is especially useful when running as a launchd service, where spawned Claude processes would otherwise inherit a minimal environment.
+
+```toml
+[server]
+port = 3001
+db_path = "~/.cmux/cmux.db"
+
+[sandbox]
+template_dir = "sandbox-profiles"
+templates = ["standard"]
+
+# Shell environment for spawned Claude processes
+[shell]
+path = "/bin/zsh"
+init_files = ["~/.zshrc", "~/.zprofile"]
+
+# Explicit env var overrides (applied on top of shell env)
+[env]
+PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+GOPATH = "/Users/me/go"
+```
+
+| Section | Purpose |
+|---------|---------|
+| **`[server]`** | Port and database path |
+| **`[sandbox]`** | Sandbox template directory and active templates |
+| **`[shell]`** | Shell path and init files to source — captures the full environment for spawned processes |
+| **`[env]`** | Explicit env var overrides applied on top of the captured shell environment |
+
+**Precedence:** config file > environment variable (`CMUX_PORT`, `CMUX_DB_PATH`, etc.) > default
+
+The config file is optional — if it doesn't exist, cmux falls back to environment variables and built-in defaults.
+
 ## 🛠️ Tech Stack
 
 <table>
