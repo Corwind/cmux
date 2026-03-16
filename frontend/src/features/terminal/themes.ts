@@ -63,7 +63,10 @@ export interface UiColors {
   active: string;
 }
 
-export function deriveUiColors(theme: ITheme): UiColors {
+export function deriveUiColors(
+  theme: ITheme,
+  overrides?: Partial<UiColors>,
+): UiColors {
   const bg = theme.background ?? "#1a1b26";
   const fg = theme.foreground ?? "#c0caf5";
   const green = (theme.green as string) ?? "#9ece6a";
@@ -74,7 +77,7 @@ export function deriveUiColors(theme: ITheme): UiColors {
   // For button backgrounds, use a deeper version for contrast with white text
   const accentButton = darken(green, 0.3);
 
-  return {
+  const derived: UiColors = {
     bg: darken(bg, 0.2),
     sidebar: bg,
     surface: lighten(bg, 0.08),
@@ -91,6 +94,8 @@ export function deriveUiColors(theme: ITheme): UiColors {
     accentButtonHover: lighten(accentButton, 0.12),
     active: sel,
   };
+
+  return overrides ? { ...derived, ...overrides } : derived;
 }
 
 // --- Theme definitions ---
@@ -99,6 +104,8 @@ export interface TerminalTheme {
   id: string;
   name: string;
   theme: ITheme;
+  /** Optional overrides for the derived sidebar/UI colors. */
+  uiOverrides?: Partial<UiColors>;
 }
 
 export const terminalThemes: TerminalTheme[] = [
@@ -126,6 +133,24 @@ export const terminalThemes: TerminalTheme[] = [
       brightMagenta: "#bb9af7",
       brightCyan: "#7dcfff",
       brightWhite: "#c0caf5",
+    },
+    // Original Tailwind gray/green palette to match the hand-tuned default look
+    uiOverrides: {
+      bg: "#030712",           // gray-950
+      sidebar: "#111827",      // gray-900
+      surface: "#1f2937",      // gray-800
+      surfaceHover: "#374151", // gray-700
+      border: "#1f2937",       // gray-800
+      borderLight: "#374151",  // gray-700
+      text: "#ffffff",         // white
+      textSecondary: "#d1d5db",// gray-300
+      textMuted: "#6b7280",    // gray-500
+      textFaint: "#374151",    // gray-700
+      accent: "#4ade80",       // green-400
+      accentHover: "#22c55e",  // green-500
+      accentButton: "#16a34a", // green-600
+      accentButtonHover: "#22c55e", // green-500
+      active: "#374151",       // gray-700
     },
   },
   {

@@ -10,8 +10,8 @@ export function useThemeVars(): React.CSSProperties {
   const themeId = useTerminalThemeStore((s) => s.themeId);
 
   return useMemo(() => {
-    const { theme } = getTerminalTheme(themeId);
-    const ui = deriveUiColors(theme);
+    const t = getTerminalTheme(themeId);
+    const ui = deriveUiColors(t.theme, t.uiOverrides);
 
     return {
       "--cmux-bg": ui.bg,
