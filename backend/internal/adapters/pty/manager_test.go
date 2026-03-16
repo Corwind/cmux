@@ -3,8 +3,11 @@ package pty
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/Corwind/cmux/backend/internal/ports"
 )
 
 func newTestManager() *Manager {
@@ -158,17 +161,112 @@ func TestKill(t *testing.T) {
 	}
 }
 
-func TestDefaultCommand(t *testing.T) {
-	m := NewManager()
-	if m.command != "claude" {
-		t.Fatalf("expected default command 'claude', got %q", m.command)
+func TestWithCommandOptionChangesSpawnedProcess(t *testing.T) {
+	// Verify that WithCommand controls which binary runs.
+	// "echo hello" exits immediately and produces output — if the wrong
+	// command ran, we'd see different output or a spawn failure.
+	m := NewManager(WithCommand("sh"), WithFixedArgs("-c", "echo hello_from_custom_cmd"))
+	ctx := context.Background()
+
+	handle, err := m.Spawn(ctx, os.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn with custom command failed: %v", err)
+	}
+	defer func() { _ = m.Kill(handle.PID) }()
+
+	output := readAllPTY(t, handle)
+	if !contains(output, "hello_from_custom_cmd") {
+		t.Fatalf("expected 'hello_from_custom_cmd' in output, got: %s", output)
 	}
 }
 
-func TestWithCommandOption(t *testing.T) {
-	m := NewManager(WithCommand("echo"))
-	if m.command != "echo" {
-		t.Fatalf("expected command 'echo', got %q", m.command)
+func TestWithEnvOption(t *testing.T) {
+	env := []string{"FOO=bar", "BAZ=qux"}
+	m := NewManager(WithEnv(env))
+	if m.baseEnv == nil {
+		t.Fatal("expected baseEnv to be set")
 	}
+	if len(m.baseEnv) != 2 {
+		t.Fatalf("expected 2 env vars, got %d", len(m.baseEnv))
+	}
+	if m.baseEnv[0] != "FOO=bar" {
+		t.Fatalf("expected FOO=bar, got %q", m.baseEnv[0])
+	}
+}
+
+func TestWithEnvSpawnUsesBaseEnv(t *testing.T) {
+	// Use "sh" with env command to print environment
+	baseEnv := []string{"CMUX_TEST_VAR=hello", "PATH=" + os.Getenv("PATH")}
+	m := NewManager(WithCommand("sh"), WithFixedArgs("-c", "env"), WithEnv(baseEnv))
+	ctx := context.Background()
+
+	handle, err := m.Spawn(ctx, os.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn failed: %v", err)
+	}
+	defer func() { _ = m.Kill(handle.PID) }()
+
+	output := readAllPTY(t, handle)
+	if !contains(output, "CMUX_TEST_VAR=hello") {
+		t.Fatalf("expected CMUX_TEST_VAR=hello in output, got: %s", output)
+	}
+	// TERM and LANG should always be appended
+	if !contains(output, "TERM=xterm-256color") {
+		t.Fatalf("expected TERM=xterm-256color in output, got: %s", output)
+	}
+}
+
+func TestWithEnvFiltersCLAUDECODE(t *testing.T) {
+	baseEnv := []string{"CLAUDECODE=secret", "KEEP=yes", "PATH=" + os.Getenv("PATH")}
+	m := NewManager(WithCommand("sh"), WithFixedArgs("-c", "env"), WithEnv(baseEnv))
+	ctx := context.Background()
+
+	handle, err := m.Spawn(ctx, os.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn failed: %v", err)
+	}
+	defer func() { _ = m.Kill(handle.PID) }()
+
+	output := readAllPTY(t, handle)
+	if contains(output, "CLAUDECODE=secret") {
+		t.Fatalf("expected CLAUDECODE to be filtered, but found in output: %s", output)
+	}
+	if !contains(output, "KEEP=yes") {
+		t.Fatalf("expected KEEP=yes in output, got: %s", output)
+	}
+}
+
+func readAllPTY(t *testing.T, handle *ports.PTYHandle) string {
+	t.Helper()
+
+	// Read PTY output concurrently — must drain before process exits and
+	// the kernel closes the PTY slave side.
+	ch := make(chan string, 1)
+	go func() {
+		var output strings.Builder
+		buf := make([]byte, 4096)
+		for {
+			n, err := handle.PTY.Read(buf)
+			if n > 0 {
+				output.Write(buf[:n])
+			}
+			if err != nil {
+				ch <- output.String()
+				return
+			}
+		}
+	}()
+
+	select {
+	case data := <-ch:
+		return data
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out reading PTY output")
+		return ""
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && strings.Contains(s, substr)
 }
 
