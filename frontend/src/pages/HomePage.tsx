@@ -2,7 +2,7 @@ import { useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SessionList, CreateSessionDialog, useSessionsStore } from "@/features/sessions";
 import { TemplateManager } from "@/features/templates";
-import { Terminal } from "@/features/terminal";
+import { Terminal, ThemePicker } from "@/features/terminal";
 
 export function HomePage() {
   const activeSessionId = useSessionsStore((s) => s.activeSessionId);
@@ -15,6 +15,9 @@ export function HomePage() {
           <CreateSessionDialog />
           <div className="mt-3">
             <SessionList />
+          </div>
+          <div className="mt-4 border-t border-gray-700 pt-3">
+            <ThemePicker />
           </div>
           <div className="mt-4 border-t border-gray-700 pt-3">
             <button
