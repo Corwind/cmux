@@ -1,5 +1,6 @@
 # Backend
 backend/bin/
+backend/cmux
 backend/db/cmux.db
 
 # Frontend

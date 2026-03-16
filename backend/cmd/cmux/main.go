@@ -12,24 +12,24 @@ import (
 	"time"
 
 	appservice "github.com/Corwind/cmux/backend/internal/app"
-	httpadapter "github.com/Corwind/cmux/backend/internal/adapters/http"
+	configadapter "github.com/Corwind/cmux/backend/internal/adapters/config"
 	"github.com/Corwind/cmux/backend/internal/adapters/filesystem"
+	httpadapter "github.com/Corwind/cmux/backend/internal/adapters/http"
 	"github.com/Corwind/cmux/backend/internal/adapters/pty"
 	"github.com/Corwind/cmux/backend/internal/adapters/pty/sandbox"
 	"github.com/Corwind/cmux/backend/internal/adapters/sqlite"
 )
 
 func main() {
-	dbPath := os.Getenv("CMUX_DB_PATH")
-	if dbPath == "" {
-		dbPath = "db/cmux.db"
-	}
-	port := os.Getenv("CMUX_PORT")
-	if port == "" {
-		port = "3001"
+	cfg, err := configadapter.Load()
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
 	}
 
-	repo, err := sqlite.NewRepository(dbPath)
+	baseEnv := configadapter.ResolveShellEnv(cfg)
+	log.Printf("resolved %d env vars for spawned processes", len(baseEnv))
+
+	repo, err := sqlite.NewRepository(cfg.Server.DBPath)
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
@@ -38,20 +38,15 @@ func main() {
 	templateService := appservice.NewTemplateService(templateRepo)
 
 	// Seed templates from sandbox-profiles directory if none exist
-	seedTemplates(templateService)
+	seedTemplates(templateService, cfg.Sandbox.TemplateDir)
 
-	templateDir := os.Getenv("CMUX_SANDBOX_TEMPLATE_DIR")
-	if templateDir == "" {
-		templateDir = "sandbox-profiles"
-	}
-	builder := sandbox.NewProfileBuilder(templateDir)
-	managerOpts := []pty.Option{pty.WithSandbox(builder)}
+	builder := sandbox.NewProfileBuilder(cfg.Sandbox.TemplateDir)
+	managerOpts := []pty.Option{pty.WithSandbox(builder), pty.WithEnv(baseEnv)}
 
-	if tmplEnv := os.Getenv("CMUX_SANDBOX_TEMPLATES"); tmplEnv != "" {
-		templates := strings.Split(tmplEnv, ",")
-		managerOpts = append(managerOpts, pty.WithSandboxTemplates(templates...))
+	if len(cfg.Sandbox.Templates) > 0 {
+		managerOpts = append(managerOpts, pty.WithSandboxTemplates(cfg.Sandbox.Templates...))
 	}
-	log.Printf("sandbox enabled (template dir: %s)", templateDir)
+	log.Printf("sandbox enabled (template dir: %s)", cfg.Sandbox.TemplateDir)
 
 	processManager := pty.NewManager(managerOpts...)
 	fileBrowser := filesystem.NewBrowser()
@@ -59,7 +54,7 @@ func main() {
 
 	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser)
 
-	addr := fmt.Sprintf(":%s", port)
+	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	server := &http.Server{
 		Addr:    addr,
 		Handler: router,
@@ -93,7 +88,7 @@ func main() {
 	log.Printf("cmux stopped")
 }
 
-func seedTemplates(svc *appservice.TemplateService) {
+func seedTemplates(svc *appservice.TemplateService, profileDir string) {
 	ctx := context.Background()
 	templates, err := svc.ListTemplates(ctx)
 	if err != nil {
@@ -102,11 +97,6 @@ func seedTemplates(svc *appservice.TemplateService) {
 	}
 	if len(templates) > 0 {
 		return
-	}
-
-	profileDir := os.Getenv("CMUX_SANDBOX_TEMPLATE_DIR")
-	if profileDir == "" {
-		profileDir = "sandbox-profiles"
 	}
 
 	entries, err := os.ReadDir(profileDir)
