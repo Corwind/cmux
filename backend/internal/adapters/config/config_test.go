@@ -10,7 +10,6 @@ func TestLoadDefaults(t *testing.T) {
 	// Unset all env vars that could affect the result
 	for _, key := range []string{"CMUX_CONFIG_PATH", "CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
 		t.Setenv(key, "")
-		os.Unsetenv(key)
 	}
 	// Point config path to a non-existent file so no TOML is loaded
 	t.Setenv("CMUX_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.toml"))
@@ -85,7 +84,6 @@ FOO = "bar"
 	// Unset env vars so they don't interfere
 	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
 		t.Setenv(key, "")
-		os.Unsetenv(key)
 	}
 	t.Setenv("CMUX_CONFIG_PATH", configFile)
 
@@ -135,7 +133,6 @@ port = "7070"
 	// Clear others
 	for _, key := range []string{"CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
 		t.Setenv(key, "")
-		os.Unsetenv(key)
 	}
 
 	cfg, err := Load()
@@ -169,7 +166,6 @@ init_files = ["~/.zshrc", "~/.profile"]
 
 	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
 		t.Setenv(key, "")
-		os.Unsetenv(key)
 	}
 	t.Setenv("CMUX_CONFIG_PATH", configFile)
 
@@ -197,7 +193,6 @@ init_files = ["~/.zshrc", "~/.profile"]
 func TestLoadMissingConfigFileNotError(t *testing.T) {
 	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
 		t.Setenv(key, "")
-		os.Unsetenv(key)
 	}
 	t.Setenv("CMUX_CONFIG_PATH", filepath.Join(t.TempDir(), "does_not_exist.toml"))
 
@@ -238,7 +233,6 @@ port = "4000"
 
 	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
 		t.Setenv(key, "")
-		os.Unsetenv(key)
 	}
 	t.Setenv("CMUX_CONFIG_PATH", configFile)
 
