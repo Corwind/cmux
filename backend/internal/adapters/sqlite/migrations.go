@@ -13,6 +13,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 `
 
+const addTemplateIDToSessions = `
+ALTER TABLE sessions ADD COLUMN template_id TEXT NOT NULL DEFAULT '';
+`
+
 const createTemplatesTable = `
 CREATE TABLE IF NOT EXISTS sandbox_templates (
 	id TEXT PRIMARY KEY,

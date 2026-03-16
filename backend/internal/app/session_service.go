@@ -45,6 +45,7 @@ func (s *SessionService) CreateSession(ctx context.Context, name, workingDir, te
 
 	session.PID = handle.PID
 	session.Status = domain.StatusRunning
+	session.TemplateID = templateID
 
 	if err := s.repo.Create(ctx, session); err != nil {
 		_ = s.processManager.Kill(handle.PID)
@@ -93,6 +94,9 @@ func (s *SessionService) ResumeSession(ctx context.Context, id string) (domain.S
 	if session.Status == domain.StatusRunning && s.processManager.IsAlive(session.PID) {
 		return session, nil
 	}
+
+	// Reapply the sandbox template that was used when the session was created
+	s.applySandboxContent(ctx, session.TemplateID)
 
 	handle, err := s.processManager.Spawn(ctx, session.WorkingDir, "--resume", session.ClaudeSessionID)
 	if err != nil {

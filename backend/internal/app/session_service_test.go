@@ -109,6 +109,23 @@ func (m *mockProcessManager) GetHandle(pid int) (*ports.PTYHandle, bool) {
 	return h, ok
 }
 
+// --- Mock ProcessManager with SandboxContentProvider ---
+
+type mockSandboxProcessManager struct {
+	mockProcessManager
+	sandboxContents []string
+}
+
+func newMockSandboxProcessManager() *mockSandboxProcessManager {
+	return &mockSandboxProcessManager{
+		mockProcessManager: *newMockProcessManager(),
+	}
+}
+
+func (m *mockSandboxProcessManager) SetSandboxContent(contents []string) {
+	m.sandboxContents = contents
+}
+
 // --- Tests ---
 
 func TestCreateSession_Success(t *testing.T) {
@@ -353,5 +370,102 @@ func TestResizePTY(t *testing.T) {
 	err := svc.ResizePTY(42, 24, 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateSession_StoresTemplateID(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockSandboxProcessManager()
+	tmplRepo := newMockTemplateRepo()
+	tmpl := domain.SandboxTemplate{ID: "tmpl-1", Name: "test", Content: "(allow network-outbound)"}
+	tmplRepo.templates["tmpl-1"] = tmpl
+
+	svc := NewSessionService(repo, pm, tmplRepo)
+	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "tmpl-1", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if session.TemplateID != "tmpl-1" {
+		t.Errorf("expected TemplateID 'tmpl-1', got %q", session.TemplateID)
+	}
+
+	stored, err := repo.Get(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stored.TemplateID != "tmpl-1" {
+		t.Errorf("expected stored TemplateID 'tmpl-1', got %q", stored.TemplateID)
+	}
+}
+
+func TestResumeSession_AppliesSandboxTemplate(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockSandboxProcessManager()
+	tmplRepo := newMockTemplateRepo()
+	tmpl := domain.SandboxTemplate{ID: "tmpl-1", Name: "test", Content: "(allow network-outbound)"}
+	tmplRepo.templates["tmpl-1"] = tmpl
+
+	svc := NewSessionService(repo, pm, tmplRepo)
+
+	// Create session with template
+	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "tmpl-1", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Simulate process death
+	delete(pm.alive, session.PID)
+	session.Status = domain.StatusStopped
+	_ = repo.Update(context.Background(), session)
+
+	// Clear sandbox contents to verify resume sets them again
+	pm.sandboxContents = nil
+
+	// Resume
+	resumed, err := svc.ResumeSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resumed.Status != domain.StatusRunning {
+		t.Errorf("expected status running, got %q", resumed.Status)
+	}
+
+	// Verify sandbox content was applied
+	if len(pm.sandboxContents) == 0 {
+		t.Fatal("expected sandbox content to be set on resume, but it was empty")
+	}
+	if pm.sandboxContents[0] != "(allow network-outbound)" {
+		t.Errorf("expected sandbox content '(allow network-outbound)', got %q", pm.sandboxContents[0])
+	}
+}
+
+func TestResumeSession_AlreadyRunning(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm, nil)
+
+	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Resume while still running — should return immediately
+	resumed, err := svc.ResumeSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resumed.ID != session.ID {
+		t.Errorf("expected same session ID")
+	}
+}
+
+func TestResumeSession_NotFound(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm, nil)
+
+	_, err := svc.ResumeSession(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
 	}
 }

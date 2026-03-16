@@ -22,6 +22,7 @@ type Session struct {
 	Status          SessionStatus
 	PID             int
 	ClaudeSessionID string
+	TemplateID      string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
