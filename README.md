@@ -152,7 +152,7 @@ cmux can be configured via a TOML file at `~/.cmux/config.toml`. This is especia
 
 ```toml
 [server]
-port = 3001
+port = "3001"
 db_path = "~/.cmux/cmux.db"
 
 [sandbox]
