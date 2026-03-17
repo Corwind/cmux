@@ -58,17 +58,21 @@ func (m *mockRepo) Delete(ctx context.Context, id string) error {
 // --- Mock ProcessManager ---
 
 type mockProcessManager struct {
-	alive     map[int]bool
-	handles   map[int]*ports.PTYHandle
-	spawnErr  error
-	killPIDs  []int
-	spawnArgs []string
+	alive      map[int]bool
+	handles    map[int]*ports.PTYHandle
+	doneChans  map[int]chan error
+	spawnErr   error
+	killPIDs   []int
+	spawnArgs  []string
+	nextPID    int
 }
 
 func newMockProcessManager() *mockProcessManager {
 	return &mockProcessManager{
-		alive:   make(map[int]bool),
-		handles: make(map[int]*ports.PTYHandle),
+		alive:     make(map[int]bool),
+		handles:   make(map[int]*ports.PTYHandle),
+		doneChans: make(map[int]chan error),
+		nextPID:   42,
 	}
 }
 
@@ -77,14 +81,17 @@ func (m *mockProcessManager) Spawn(ctx context.Context, workingDir string, args 
 	if m.spawnErr != nil {
 		return nil, m.spawnErr
 	}
+	pid := m.nextPID
+	m.nextPID++
 	done := make(chan error, 1)
 	h := &ports.PTYHandle{
 		PTY:  os.Stdin, // placeholder
-		PID:  42,
+		PID:  pid,
 		Done: done,
 	}
-	m.alive[42] = true
-	m.handles[42] = h
+	m.alive[pid] = true
+	m.handles[pid] = h
+	m.doneChans[pid] = done
 	return h, nil
 }
 
@@ -674,5 +681,50 @@ func TestRestartSession_NotFound(t *testing.T) {
 	_, err := svc.RestartSession(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent session")
+	}
+}
+
+func TestWatchProcess_IgnoresStaleWatcher(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm, nil)
+
+	// Create a session — spawns with PID 42, watcher on handle.Done
+	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	oldPID := session.PID
+	oldDone := pm.doneChans[oldPID]
+
+	// Restart — kills old PID, spawns new PID (43)
+	restarted, err := svc.RestartSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if restarted.PID == oldPID {
+		t.Fatalf("expected new PID, got same as old: %d", restarted.PID)
+	}
+
+	// Simulate old process finally exiting (old watcher fires)
+	oldDone <- nil
+
+	// Give the watcher goroutine time to run
+	// Use a channel-based sync: read the session back in a short loop
+	// to allow the goroutine to complete
+	for i := 0; i < 100; i++ {
+		s, _ := svc.GetSession(context.Background(), session.ID)
+		if s.Status != domain.StatusRunning {
+			t.Fatalf("stale watcher incorrectly set session to %q after restart", s.Status)
+		}
+	}
+
+	// Session should still be running with the new PID
+	final, _ := svc.GetSession(context.Background(), session.ID)
+	if final.Status != domain.StatusRunning {
+		t.Errorf("expected status running, got %q", final.Status)
+	}
+	if final.PID != restarted.PID {
+		t.Errorf("expected PID %d, got %d", restarted.PID, final.PID)
 	}
 }

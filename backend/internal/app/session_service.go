@@ -200,6 +200,14 @@ func (s *SessionService) watchProcess(sessionID string, handle *ports.PTYHandle)
 	if err != nil {
 		return
 	}
+
+	// Only update if the session still belongs to this process.
+	// After a restart, a new process owns the session and this
+	// stale watcher must not overwrite the new running status.
+	if session.PID != handle.PID {
+		return
+	}
+
 	session.Status = domain.StatusStopped
 	_ = s.repo.Update(ctx, session)
 }
