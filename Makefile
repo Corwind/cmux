@@ -1,4 +1,6 @@
-.PHONY: all build test run clean install dev backend frontend lint install-service uninstall-service restart-service service-logs
+.PHONY: all build test run clean install dev backend frontend lint \
+	install-service uninstall-service restart-service service-logs \
+	embed-frontend backend-embed tauri-prebuild tauri-dev tauri-build
 
 all: build
 
@@ -37,6 +39,44 @@ lint:
 
 clean:
 	rm -rf backend/bin backend/db/cmux.db frontend/dist
+	rm -rf backend/internal/static/dist
+	rm -rf src-tauri/binaries src-tauri/target
+
+# --- Embedded frontend build ---
+
+# Copy built frontend into Go embed location
+embed-frontend: frontend
+	rm -rf backend/internal/static/dist
+	cp -r frontend/dist backend/internal/static/dist
+
+# Build self-contained Go binary (API + embedded frontend)
+backend-embed: embed-frontend
+	cd backend && go build -o bin/cmux ./cmd/cmux
+ifeq ($(shell uname -s),Darwin)
+	codesign --force --options runtime --sign - backend/bin/cmux
+endif
+
+# --- Tauri desktop app ---
+
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),arm64)
+  TARGET_TRIPLE := aarch64-apple-darwin
+else
+  TARGET_TRIPLE := x86_64-apple-darwin
+endif
+
+# Prepare sidecar binary for Tauri
+tauri-prebuild: backend-embed
+	mkdir -p src-tauri/binaries
+	cp backend/bin/cmux src-tauri/binaries/cmux-$(TARGET_TRIPLE)
+
+# Tauri dev mode (builds Go+frontend, then opens native window)
+tauri-dev: tauri-prebuild
+	cd src-tauri && cargo tauri dev
+
+# Tauri production build (produces .app / .dmg)
+tauri-build: tauri-prebuild
+	cd src-tauri && cargo tauri build
 
 # --- macOS Service (launchd) ---
 
