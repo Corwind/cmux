@@ -25,11 +25,10 @@
     "active": true,
     "targets": ["dmg", "app"],
     "icon": [
-      "icons/icon.icns",
       "icons/icon.png"
     ],
     "externalBin": [
-      "binaries/cmux"
+      "binaries/cmux-server"
     ],
     "macOS": {
       "signingIdentity": "-"

@@ -68,7 +68,7 @@ endif
 # Prepare sidecar binary for Tauri
 tauri-prebuild: backend-embed
 	mkdir -p src-tauri/binaries
-	cp backend/bin/cmux src-tauri/binaries/cmux-$(TARGET_TRIPLE)
+	cp backend/bin/cmux src-tauri/binaries/cmux-server-$(TARGET_TRIPLE)
 
 # Tauri dev mode (builds Go+frontend, then opens native window)
 tauri-dev: tauri-prebuild

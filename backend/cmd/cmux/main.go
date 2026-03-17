@@ -57,11 +57,15 @@ func main() {
 	// Serve embedded frontend assets (populated by make embed-frontend)
 	var frontendFS fs.FS
 	if sub, err := fs.Sub(static.Assets, "dist"); err == nil {
-		// Check if the dist directory has any content (not just .gitkeep)
 		entries, _ := fs.ReadDir(sub, ".")
 		if len(entries) > 1 || (len(entries) == 1 && entries[0].Name() != ".gitkeep") {
 			frontendFS = sub
+			log.Printf("frontend assets embedded (%d entries), serving SPA", len(entries))
+		} else {
+			log.Printf("no frontend assets found in embedded dist (%d entries)", len(entries))
 		}
+	} else {
+		log.Printf("failed to access embedded dist: %v", err)
 	}
 
 	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, frontendFS)

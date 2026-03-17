@@ -20,4 +20,4 @@ serde_json = "1"
 reqwest = { version = "0.12", features = ["blocking"] }
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }

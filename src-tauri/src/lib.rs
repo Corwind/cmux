@@ -47,7 +47,7 @@ pub fn run() {
             // Spawn the Go backend as a sidecar process
             let sidecar = app
                 .shell()
-                .sidecar("cmux")
+                .sidecar("cmux-server")
                 .map_err(|e| format!("failed to create sidecar command: {e}"))?;
 
             let (_rx, child) = sidecar
