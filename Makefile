@@ -14,12 +14,16 @@ dev:
 	wait
 
 # Build
-build:
+backend:
 	cd backend && go build -o bin/cmux ./cmd/cmux
 ifeq ($(shell uname -s),Darwin)
 	codesign --force --options runtime --sign - backend/bin/cmux
 endif
+
+frontend:
 	cd frontend && npm run build
+
+build: backend frontend
 
 # Test
 test:
@@ -36,29 +40,31 @@ clean:
 
 # --- macOS Service (launchd) ---
 
-PLIST_SRC  := com.corwind.cmux.plist
-PLIST_DEST := $(HOME)/Library/LaunchAgents/com.corwind.cmux.plist
-BIN_DEST   := $(HOME)/.local/bin/cmux
-DATA_DIR   := $(HOME)/.cmux
+PLIST_SRC    := com.corwind.cmux.plist
+PLIST_DEST   := $(HOME)/Library/LaunchAgents/com.corwind.cmux.plist
+SERVICE_TARGET := gui/$(shell id -u)/com.corwind.cmux
+BIN_DEST     := $(HOME)/.local/bin/cmux
+DATA_DIR     := $(HOME)/.cmux
 
-install-service: build
+install-service: backend
 	@mkdir -p $(DATA_DIR)
 	@mkdir -p $(dir $(BIN_DEST))
 	cp backend/bin/cmux $(BIN_DEST)
 	sed 's|__HOME__|$(HOME)|g' $(PLIST_SRC) > $(PLIST_DEST)
-	launchctl load $(PLIST_DEST)
+	-launchctl bootout $(SERVICE_TARGET) 2>/dev/null
+	launchctl bootstrap gui/$(shell id -u) $(PLIST_DEST)
 	@echo "cmux service installed and started"
 
 uninstall-service:
-	-launchctl unload $(PLIST_DEST) 2>/dev/null
+	-launchctl bootout $(SERVICE_TARGET) 2>/dev/null
 	-rm -f $(PLIST_DEST)
 	-rm -f $(BIN_DEST)
 	@echo "cmux service uninstalled"
 
-restart-service:
-	launchctl unload $(PLIST_DEST)
+restart-service: backend
 	cp backend/bin/cmux $(BIN_DEST)
-	launchctl load $(PLIST_DEST)
+	-launchctl bootout $(SERVICE_TARGET) 2>/dev/null
+	launchctl bootstrap gui/$(shell id -u) $(PLIST_DEST)
 	@echo "cmux service restarted"
 
 service-logs:

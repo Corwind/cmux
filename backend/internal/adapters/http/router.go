@@ -32,6 +32,7 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 		r.Post("/sessions", sessionHandler.Create)
 		r.Get("/sessions/{id}", sessionHandler.Get)
 		r.Post("/sessions/{id}/resume", sessionHandler.Resume)
+		r.Post("/sessions/{id}/restart", sessionHandler.Restart)
 		r.Delete("/sessions/{id}", sessionHandler.Delete)
 
 		r.Get("/templates", templateHandler.List)
@@ -75,6 +76,7 @@ func NewTestRouter(sessionService *app.SessionService, templateService *app.Temp
 		r.Post("/sessions", sessionHandler.Create)
 		r.Get("/sessions/{id}", sessionHandler.Get)
 		r.Post("/sessions/{id}/resume", sessionHandler.Resume)
+		r.Post("/sessions/{id}/restart", sessionHandler.Restart)
 		r.Delete("/sessions/{id}", sessionHandler.Delete)
 
 		r.Get("/templates", templateHandler.List)

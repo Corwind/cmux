@@ -120,6 +120,23 @@ func (s *SessionService) ResumeSession(ctx context.Context, id string) (domain.S
 	return session, nil
 }
 
+func (s *SessionService) RestartSession(ctx context.Context, id string) (domain.Session, error) {
+	session, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return domain.Session{}, err
+	}
+
+	if session.Status == domain.StatusRunning && s.processManager.IsAlive(session.PID) {
+		_ = s.processManager.Kill(session.PID)
+		session.Status = domain.StatusStopped
+		if err := s.repo.Update(ctx, session); err != nil {
+			return domain.Session{}, fmt.Errorf("failed to update session: %w", err)
+		}
+	}
+
+	return s.ResumeSession(ctx, id)
+}
+
 func (s *SessionService) GetSession(ctx context.Context, id string) (domain.Session, error) {
 	return s.repo.Get(ctx, id)
 }
@@ -183,6 +200,14 @@ func (s *SessionService) watchProcess(sessionID string, handle *ports.PTYHandle)
 	if err != nil {
 		return
 	}
+
+	// Only update if the session still belongs to this process.
+	// After a restart, a new process owns the session and this
+	// stale watcher must not overwrite the new running status.
+	if session.PID != handle.PID {
+		return
+	}
+
 	session.Status = domain.StatusStopped
 	_ = s.repo.Update(ctx, session)
 }

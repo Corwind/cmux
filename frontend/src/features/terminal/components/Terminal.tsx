@@ -37,7 +37,56 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     let ws: WebSocket | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let resizeTimer: ReturnType<typeof setTimeout>;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
     let alive = true;
+    let intentionalClose = false;
+
+    const wsUrl =
+      wsBaseUrl ?? `ws://${window.location.hostname}:3001/ws/sessions/${sessionId}`;
+
+    function connectWs(currentTerm: XTerm, fitAddon: FitAddon, encoder: TextEncoder) {
+      if (!alive) return;
+
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
+      const currentWs = ws;
+
+      currentWs.onopen = () => {
+        if (!alive) return;
+        fitAddon.fit();
+        currentWs.send(JSON.stringify({ type: "resize", rows: currentTerm.rows, cols: currentTerm.cols }));
+      };
+
+      currentWs.onmessage = (event: MessageEvent) => {
+        if (!alive || !currentTerm) return;
+        if (event.data instanceof ArrayBuffer) {
+          currentTerm.write(new Uint8Array(event.data));
+        } else if (event.data instanceof Blob) {
+          event.data.arrayBuffer().then((buf) => {
+            if (alive && currentTerm) currentTerm.write(new Uint8Array(buf));
+          });
+        } else {
+          currentTerm.write(event.data);
+        }
+      };
+
+      currentWs.onclose = () => {
+        if (!alive || intentionalClose) return;
+        reconnectTimer = setTimeout(() => connectWs(currentTerm, fitAddon, encoder), 1000);
+      };
+
+      currentTerm.onData((data) => {
+        if (currentWs.readyState === WebSocket.OPEN) {
+          currentWs.send(encoder.encode(data));
+        }
+      });
+
+      currentTerm.onResize(({ rows, cols }) => {
+        if (currentWs.readyState === WebSocket.OPEN) {
+          currentWs.send(JSON.stringify({ type: "resize", rows, cols }));
+        }
+      });
+    }
 
     function doMount() {
       if (!alive || !container) return;
@@ -78,8 +127,8 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
 
       // Handle CSI ? u — kitty protocol query (Claude Code asks "do you support this?")
       currentTerm.parser.registerCsiHandler({ prefix: "?", final: "u" }, () => {
-        if (currentWs.readyState === WebSocket.OPEN) {
-          currentWs.send(encoder.encode(`\x1b[?${kittyModeFlags}u`));
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(encoder.encode(`\x1b[?${kittyModeFlags}u`));
         }
         return false;
       });
@@ -96,55 +145,20 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         return false;
       });
 
-      const wsUrl =
-        wsBaseUrl ?? `ws://${window.location.hostname}:3001/ws/sessions/${sessionId}`;
-      ws = new WebSocket(wsUrl);
-      ws.binaryType = "arraybuffer";
-      const currentWs = ws;
-
-      currentWs.onopen = () => {
-        if (!alive) return;
-        fitAddon.fit();
-        currentWs.send(JSON.stringify({ type: "resize", rows: currentTerm.rows, cols: currentTerm.cols }));
-      };
-
-      currentWs.onmessage = (event: MessageEvent) => {
-        if (!alive || !currentTerm) return;
-        if (event.data instanceof ArrayBuffer) {
-          currentTerm.write(new Uint8Array(event.data));
-        } else if (event.data instanceof Blob) {
-          event.data.arrayBuffer().then((buf) => {
-            if (alive && currentTerm) currentTerm.write(new Uint8Array(buf));
-          });
-        } else {
-          currentTerm.write(event.data);
-        }
-      };
-
       // Intercept Shift+Enter at the DOM level (capture phase) to fully prevent
       // xterm.js from also sending \r. Send kitty protocol escape sequence instead.
       const onKeyDown = (event: KeyboardEvent) => {
         if (event.key === "Enter" && event.shiftKey) {
           event.preventDefault();
           event.stopPropagation();
-          if (currentWs.readyState === WebSocket.OPEN) {
-            currentWs.send(encoder.encode("\x1b[13;2u"));
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(encoder.encode("\x1b[13;2u"));
           }
         }
       };
       container.addEventListener("keydown", onKeyDown, true);
 
-      currentTerm.onData((data) => {
-        if (currentWs.readyState === WebSocket.OPEN) {
-          currentWs.send(encoder.encode(data));
-        }
-      });
-
-      currentTerm.onResize(({ rows, cols }) => {
-        if (currentWs.readyState === WebSocket.OPEN) {
-          currentWs.send(JSON.stringify({ type: "resize", rows, cols }));
-        }
-      });
+      connectWs(currentTerm, fitAddon, encoder);
 
       resizeObserver = new ResizeObserver(() => {
         clearTimeout(resizeTimer);
@@ -157,7 +171,9 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
 
     const cleanup = () => {
       alive = false;
+      intentionalClose = true;
       clearTimeout(resizeTimer);
+      clearTimeout(reconnectTimer);
       resizeObserver?.disconnect();
       if (ws && ws.readyState <= WebSocket.OPEN) {
         ws.close();

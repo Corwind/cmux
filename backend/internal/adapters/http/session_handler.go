@@ -117,6 +117,20 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *SessionHandler) Restart(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	session, err := h.service.RestartSession(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(toSessionResponse(session)); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
+}
+
 func (h *SessionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.service.DeleteSession(r.Context(), id); err != nil {
