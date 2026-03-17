@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/Corwind/cmux/backend/internal/adapters/pty"
 	"github.com/Corwind/cmux/backend/internal/adapters/pty/sandbox"
 	"github.com/Corwind/cmux/backend/internal/adapters/sqlite"
+	"github.com/Corwind/cmux/backend/internal/static"
 )
 
 func main() {
@@ -52,7 +54,17 @@ func main() {
 	fileBrowser := filesystem.NewBrowser()
 	sessionService := appservice.NewSessionService(repo, processManager, templateRepo)
 
-	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser)
+	// Serve embedded frontend assets (populated by make embed-frontend)
+	var frontendFS fs.FS
+	if sub, err := fs.Sub(static.Assets, "dist"); err == nil {
+		// Check if the dist directory has any content (not just .gitkeep)
+		entries, _ := fs.ReadDir(sub, ".")
+		if len(entries) > 1 || (len(entries) == 1 && entries[0].Name() != ".gitkeep") {
+			frontendFS = sub
+		}
+	}
+
+	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, frontendFS)
 
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	server := &http.Server{

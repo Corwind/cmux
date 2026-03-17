@@ -42,7 +42,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     let intentionalClose = false;
 
     const wsUrl =
-      wsBaseUrl ?? `ws://${window.location.hostname}:3001/ws/sessions/${sessionId}`;
+      wsBaseUrl ?? `ws://${window.location.host}/ws/sessions/${sessionId}`;
 
     function connectWs(currentTerm: XTerm, fitAddon: FitAddon, encoder: TextEncoder) {
       if (!alive) return;
