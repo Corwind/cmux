@@ -1,6 +1,7 @@
 import { useSessions } from "../hooks/useSessions";
 import { useDeleteSession } from "../hooks/useDeleteSession";
 import { useResumeSession } from "../hooks/useResumeSession";
+import { useRestartSession } from "../hooks/useRestartSession";
 import { useSessionsStore } from "../stores/sessions.store";
 import { StatusBadge } from "./StatusBadge";
 
@@ -8,6 +9,7 @@ export function SessionList() {
   const { data: sessions, isLoading } = useSessions();
   const deleteSession = useDeleteSession();
   const resumeSession = useResumeSession();
+  const restartSession = useRestartSession();
   const { activeSessionId, setActiveSession } = useSessionsStore();
 
   if (isLoading) {
@@ -102,6 +104,43 @@ export function SessionList() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       d="M5 3l14 9-14 9V3z"
+                    />
+                  </svg>
+                </button>
+              )}
+              {session.status === "running" && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    restartSession.mutate(session.id, {
+                      onSuccess: () => setActiveSession(session.id),
+                    });
+                  }}
+                  className="rounded p-0.5 transition-colors"
+                  style={{ color: "var(--cmux-text-muted)" }}
+                  title="Restart session (refresh sandbox template)"
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor =
+                      "var(--cmux-surface-hover)";
+                    e.currentTarget.style.color = "var(--cmux-accent)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "";
+                    e.currentTarget.style.color = "var(--cmux-text-muted)";
+                  }}
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                     />
                   </svg>
                 </button>
