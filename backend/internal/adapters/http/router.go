@@ -1,6 +1,7 @@
 package http
 
 import (
+	"io/fs"
 	"net/http"
 
 	"github.com/Corwind/cmux/backend/internal/app"
@@ -10,7 +11,7 @@ import (
 	"github.com/go-chi/cors"
 )
 
-func NewRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser) http.Handler {
+func NewRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, assets fs.FS) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -49,6 +50,11 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 	})
 
 	r.Get("/ws/sessions/{id}", wsHandler.Handle)
+
+	// Serve embedded frontend assets as catch-all (SPA)
+	if assets != nil {
+		r.Handle("/*", SPAHandler(assets))
+	}
 
 	return r
 }

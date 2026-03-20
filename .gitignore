@@ -2,6 +2,8 @@
 backend/bin/
 backend/cmux
 backend/db/cmux.db
+backend/internal/static/dist/
+!backend/internal/static/dist/.gitkeep
 
 # Frontend
 frontend/node_modules/
@@ -9,6 +11,11 @@ frontend/dist/
 frontend/coverage/
 frontend/playwright-report/
 frontend/test-results/
+
+# Tauri
+src-tauri/binaries/
+src-tauri/target/
+src-tauri/gen/
 
 # IDE
 .idea/

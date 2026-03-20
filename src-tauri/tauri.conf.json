@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicfv/tauri-v2-schema/main/tauri.conf.json",
+  "productName": "cmux",
+  "version": "0.1.0",
+  "identifier": "com.corwind.cmux",
+  "build": {
+    "beforeBuildCommand": "make tauri-prebuild",
+    "beforeDevCommand": "make tauri-prebuild",
+    "frontendDist": "./dist-placeholder"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "cmux",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app"],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "externalBin": [
+      "binaries/cmux-server"
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  }
+}

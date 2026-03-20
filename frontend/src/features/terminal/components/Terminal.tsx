@@ -40,9 +40,25 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let alive = true;
     let intentionalClose = false;
+    const encoder = new TextEncoder();
+
+    // WKWebView dead-key composition workaround state.
+    // WKWebView fires duplicate onData after compositionend and swallows the
+    // key that resolved the composition. We track composition lifecycle to
+    // suppress the duplicate and replay the swallowed key.
+    let isComposing = false;
+    let lastCompUpdateData: string | null = null;
+    let pendingReplayKey: string | null = null;
+    let compEndState: {
+      data: string;
+      firstPassed: boolean;
+      keyToReplay: string | null;
+    } | null = null;
+    let compEndTimer: ReturnType<typeof setTimeout>;
+    let replayTimer: ReturnType<typeof setTimeout>;
 
     const wsUrl =
-      wsBaseUrl ?? `ws://${window.location.hostname}:3001/ws/sessions/${sessionId}`;
+      wsBaseUrl ?? `ws://${window.location.host}/ws/sessions/${sessionId}`;
 
     function connectWs(currentTerm: XTerm, fitAddon: FitAddon, encoder: TextEncoder) {
       if (!alive) return;
@@ -76,6 +92,42 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       };
 
       currentTerm.onData((data) => {
+        // Suppress the duplicate onData that WKWebView causes after
+        // compositionend, and replay the swallowed resolving key.
+        if (compEndState && data === compEndState.data) {
+          if (compEndState.firstPassed) {
+            // Duplicate arrived — suppress it, replay key now.
+            clearTimeout(replayTimer);
+            const keyToReplay = compEndState.keyToReplay;
+            compEndState = null;
+            if (keyToReplay && currentWs.readyState === WebSocket.OPEN) {
+              currentWs.send(encoder.encode(keyToReplay));
+            }
+            return;
+          }
+          compEndState.firstPassed = true;
+          // Schedule replay with a short delay. If the WKWebView duplicate
+          // arrives it will cancel this and replay immediately. If the key
+          // arrives normally (Chrome) we cancel below. If neither happens
+          // (Safari UA suppressed duplicate but key still swallowed) the
+          // timer fires and replays.
+          if (compEndState.keyToReplay) {
+            replayTimer = setTimeout(() => {
+              if (!compEndState) return;
+              const keyToReplay = compEndState.keyToReplay;
+              compEndState = null;
+              if (keyToReplay && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(encoder.encode(keyToReplay));
+              }
+            }, 30);
+          }
+        } else if (compEndState?.keyToReplay && data === compEndState.keyToReplay) {
+          // The key arrived via normal xterm.js processing (not swallowed).
+          // Cancel the scheduled replay — it's not needed.
+          clearTimeout(replayTimer);
+          compEndState = null;
+        }
+
         if (currentWs.readyState === WebSocket.OPEN) {
           currentWs.send(encoder.encode(data));
         }
@@ -113,11 +165,61 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       const unicodeAddon = new Unicode11Addon();
       term.loadAddon(unicodeAddon);
       term.unicode.activeVersion = "11";
+
+      // Register composition + keydown handlers in capture phase on the
+      // container BEFORE term.open() so they fire before xterm.js's listeners.
+      // This is needed to work around WKWebView's broken dead-key handling:
+      // it fires a duplicate input event after compositionend and swallows
+      // the keystroke that resolved the composition.
+      container.addEventListener("compositionstart", () => {
+        isComposing = true;
+        pendingReplayKey = null;
+        lastCompUpdateData = null;
+      }, true);
+
+      container.addEventListener("compositionupdate", ((e: CompositionEvent) => {
+        lastCompUpdateData = e.data;
+      }) as EventListener, true);
+
+      container.addEventListener("compositionend", ((e: CompositionEvent) => {
+        isComposing = false;
+        const data = e.data || "";
+
+        // If the composition result equals the dead key character (no accent
+        // formed), the resolving keystroke was swallowed and needs replaying.
+        const keyToReplay =
+          data === lastCompUpdateData && pendingReplayKey
+            ? pendingReplayKey
+            : null;
+
+        compEndState = { data, firstPassed: false, keyToReplay };
+        clearTimeout(compEndTimer);
+        compEndTimer = setTimeout(() => { compEndState = null; }, 100);
+      }) as EventListener, true);
+
+      const onKeyDown = (event: KeyboardEvent) => {
+        // Intercept Shift+Enter: send kitty protocol escape instead of \r.
+        if (event.key === "Enter" && event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(encoder.encode("\x1b[13;2u"));
+          }
+          return;
+        }
+
+        // Capture the non-dead key pressed during composition so we can
+        // replay it after the duplicate suppression (WKWebView swallows it).
+        if (isComposing && event.key !== "Dead" && event.key.length === 1) {
+          pendingReplayKey = event.key;
+        }
+      };
+      container.addEventListener("keydown", onKeyDown, true);
+
       term.open(container);
       fitAddon.fit();
 
       const currentTerm = term;
-      const encoder = new TextEncoder();
 
       // Respond to kitty keyboard protocol queries from Claude Code.
       // When Claude Code starts, it queries/enables the kitty protocol via CSI sequences.
@@ -144,19 +246,6 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         kittyModeFlags = 0;
         return false;
       });
-
-      // Intercept Shift+Enter at the DOM level (capture phase) to fully prevent
-      // xterm.js from also sending \r. Send kitty protocol escape sequence instead.
-      const onKeyDown = (event: KeyboardEvent) => {
-        if (event.key === "Enter" && event.shiftKey) {
-          event.preventDefault();
-          event.stopPropagation();
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(encoder.encode("\x1b[13;2u"));
-          }
-        }
-      };
-      container.addEventListener("keydown", onKeyDown, true);
 
       connectWs(currentTerm, fitAddon, encoder);
 
