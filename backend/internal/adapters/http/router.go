@@ -74,7 +74,7 @@ func mountSPA(r chi.Router) {
 
 		// Try to open the file from the embedded FS
 		if f, err := distFS.Open(path); err == nil {
-			f.Close()
+			_ = f.Close()
 			fileServer.ServeHTTP(w, r)
 			return
 		}
