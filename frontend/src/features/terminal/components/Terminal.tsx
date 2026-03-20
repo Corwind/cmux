@@ -41,8 +41,9 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     let alive = true;
     let intentionalClose = false;
 
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl =
-      wsBaseUrl ?? `ws://${window.location.hostname}:3001/ws/sessions/${sessionId}`;
+      wsBaseUrl ?? `${wsProtocol}//${window.location.host}/ws/sessions/${sessionId}`;
 
     function connectWs(currentTerm: XTerm, fitAddon: FitAddon, encoder: TextEncoder) {
       if (!alive) return;

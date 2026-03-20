@@ -10,8 +10,19 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  build: {
+    outDir: "../backend/internal/static/dist",
+    emptyOutDir: true,
+  },
   server: {
     port: 5173,
     host: true,
+    proxy: {
+      "/api": "http://localhost:3001",
+      "/ws": {
+        target: "http://localhost:3001",
+        ws: true,
+      },
+    },
   },
 });

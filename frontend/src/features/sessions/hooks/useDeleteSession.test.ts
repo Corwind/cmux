@@ -9,7 +9,7 @@ describe("useDeleteSession", () => {
   beforeEach(() => {
     useSessionsStore.setState({ activeSessionId: null });
     server.use(
-      http.delete("http://localhost:3001/api/sessions/:id", () => {
+      http.delete("/api/sessions/:id", () => {
         return new HttpResponse(null, { status: 204 });
       }),
     );

@@ -16,17 +16,17 @@ const mockExamples = [
 ];
 
 export const handlers = [
-  http.get("http://localhost:3001/api/examples", () => {
+  http.get("/api/examples", () => {
     return HttpResponse.json({ data: mockExamples });
   }),
-  http.get("http://localhost:3001/api/examples/:id", ({ params }) => {
+  http.get("/api/examples/:id", ({ params }) => {
     const example = mockExamples.find((e) => e.id === params.id);
     if (!example) {
       return HttpResponse.json({ message: "Not found" }, { status: 404 });
     }
     return HttpResponse.json({ data: example });
   }),
-  http.post("http://localhost:3001/api/examples", async ({ request }) => {
+  http.post("/api/examples", async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown>;
     const newExample = {
       id: String(mockExamples.length + 1),

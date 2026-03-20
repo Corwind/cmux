@@ -23,7 +23,7 @@ endif
 frontend:
 	cd frontend && npm run build
 
-build: backend frontend
+build: frontend backend
 
 # Test
 test:
@@ -36,7 +36,7 @@ lint:
 	cd frontend && npm run lint
 
 clean:
-	rm -rf backend/bin backend/db/cmux.db frontend/dist
+	rm -rf backend/bin backend/db/cmux.db backend/internal/static/dist frontend/dist
 
 # --- macOS Service (launchd) ---
 

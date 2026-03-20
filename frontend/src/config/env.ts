@@ -7,7 +7,7 @@ function getEnvVar(key: string, fallback?: string): string {
 }
 
 export const env = {
-  apiBaseUrl: getEnvVar("VITE_API_BASE_URL", "http://localhost:3001/api"),
+  apiBaseUrl: getEnvVar("VITE_API_BASE_URL", "/api"),
   appTitle: getEnvVar("VITE_APP_TITLE", "Cmux Frontend"),
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,

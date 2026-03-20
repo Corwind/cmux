@@ -19,7 +19,7 @@ const mockSession = {
 describe("useRestartSession", () => {
   beforeEach(() => {
     server.use(
-      http.post("http://localhost:3001/api/sessions/:id/restart", () => {
+      http.post("/api/sessions/:id/restart", () => {
         return HttpResponse.json(mockSession);
       }),
     );
