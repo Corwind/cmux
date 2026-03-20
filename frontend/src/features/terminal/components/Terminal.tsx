@@ -42,14 +42,19 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     let intentionalClose = false;
     const encoder = new TextEncoder();
 
-    // Map physical key codes to their characters for dead key bypass.
-    // On macOS, WKWebView treats these as dead/composing keys, but in a terminal
-    // we want the literal characters. Covers US / US-International layouts.
-    const DEAD_KEY_CHARS: Record<string, [string, string]> = {
-      // [unshifted, shifted]
-      'Quote':     ["'", '"'],
-      'Backquote': ['`', '~'],
-    };
+    // WKWebView dead-key composition workaround state.
+    // WKWebView fires duplicate onData after compositionend and swallows the
+    // key that resolved the composition. We track composition lifecycle to
+    // suppress the duplicate and replay the swallowed key.
+    let isComposing = false;
+    let lastCompUpdateData: string | null = null;
+    let pendingReplayKey: string | null = null;
+    let compEndState: {
+      data: string;
+      firstPassed: boolean;
+      keyToReplay: string | null;
+    } | null = null;
+    let compEndTimer: ReturnType<typeof setTimeout>;
 
     const wsUrl =
       wsBaseUrl ?? `ws://${window.location.host}/ws/sessions/${sessionId}`;
@@ -86,6 +91,21 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       };
 
       currentTerm.onData((data) => {
+        // Suppress the duplicate onData that WKWebView causes after
+        // compositionend, and replay the swallowed resolving key.
+        if (compEndState && data === compEndState.data) {
+          if (compEndState.firstPassed) {
+            // This is the WKWebView duplicate — suppress it.
+            const keyToReplay = compEndState.keyToReplay;
+            compEndState = null;
+            if (keyToReplay && currentWs.readyState === WebSocket.OPEN) {
+              currentWs.send(encoder.encode(keyToReplay));
+            }
+            return;
+          }
+          compEndState.firstPassed = true;
+        }
+
         if (currentWs.readyState === WebSocket.OPEN) {
           currentWs.send(encoder.encode(data));
         }
@@ -124,8 +144,37 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       term.loadAddon(unicodeAddon);
       term.unicode.activeVersion = "11";
 
-      // Register keydown handler in capture phase BEFORE term.open() so it
-      // intercepts events before xterm.js's own listeners on the textarea.
+      // Register composition + keydown handlers in capture phase on the
+      // container BEFORE term.open() so they fire before xterm.js's listeners.
+      // This is needed to work around WKWebView's broken dead-key handling:
+      // it fires a duplicate input event after compositionend and swallows
+      // the keystroke that resolved the composition.
+      container.addEventListener("compositionstart", () => {
+        isComposing = true;
+        pendingReplayKey = null;
+        lastCompUpdateData = null;
+      }, true);
+
+      container.addEventListener("compositionupdate", ((e: CompositionEvent) => {
+        lastCompUpdateData = e.data;
+      }) as EventListener, true);
+
+      container.addEventListener("compositionend", ((e: CompositionEvent) => {
+        isComposing = false;
+        const data = e.data || "";
+
+        // If the composition result equals the dead key character (no accent
+        // formed), the resolving keystroke was swallowed and needs replaying.
+        const keyToReplay =
+          data === lastCompUpdateData && pendingReplayKey
+            ? pendingReplayKey
+            : null;
+
+        compEndState = { data, firstPassed: false, keyToReplay };
+        clearTimeout(compEndTimer);
+        compEndTimer = setTimeout(() => { compEndState = null; }, 100);
+      }) as EventListener, true);
+
       const onKeyDown = (event: KeyboardEvent) => {
         // Intercept Shift+Enter: send kitty protocol escape instead of \r.
         if (event.key === "Enter" && event.shiftKey) {
@@ -137,19 +186,10 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
           return;
         }
 
-        // Intercept dead keys (e.g. ' ` on macOS) to prevent WKWebView from
-        // starting a composition session that duplicates the character and
-        // swallows the next keystroke. Send the literal character directly.
-        if (event.key === "Dead" && !event.altKey && !event.ctrlKey && !event.metaKey) {
-          const chars = DEAD_KEY_CHARS[event.code];
-          if (chars) {
-            event.preventDefault();
-            event.stopPropagation();
-            const char = event.shiftKey ? chars[1] : chars[0];
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(encoder.encode(char));
-            }
-          }
+        // Capture the non-dead key pressed during composition so we can
+        // replay it after the duplicate suppression (WKWebView swallows it).
+        if (isComposing && event.key !== "Dead" && event.key.length === 1) {
+          pendingReplayKey = event.key;
         }
       };
       container.addEventListener("keydown", onKeyDown, true);
