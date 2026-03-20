@@ -40,6 +40,16 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let alive = true;
     let intentionalClose = false;
+    const encoder = new TextEncoder();
+
+    // Map physical key codes to their characters for dead key bypass.
+    // On macOS, WKWebView treats these as dead/composing keys, but in a terminal
+    // we want the literal characters. Covers US / US-International layouts.
+    const DEAD_KEY_CHARS: Record<string, [string, string]> = {
+      // [unshifted, shifted]
+      'Quote':     ["'", '"'],
+      'Backquote': ['`', '~'],
+    };
 
     const wsUrl =
       wsBaseUrl ?? `ws://${window.location.host}/ws/sessions/${sessionId}`;
@@ -114,11 +124,40 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       term.loadAddon(unicodeAddon);
       term.unicode.activeVersion = "11";
 
+      // Register keydown handler in capture phase BEFORE term.open() so it
+      // intercepts events before xterm.js's own listeners on the textarea.
+      const onKeyDown = (event: KeyboardEvent) => {
+        // Intercept Shift+Enter: send kitty protocol escape instead of \r.
+        if (event.key === "Enter" && event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(encoder.encode("\x1b[13;2u"));
+          }
+          return;
+        }
+
+        // Intercept dead keys (e.g. ' ` on macOS) to prevent WKWebView from
+        // starting a composition session that duplicates the character and
+        // swallows the next keystroke. Send the literal character directly.
+        if (event.key === "Dead" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+          const chars = DEAD_KEY_CHARS[event.code];
+          if (chars) {
+            event.preventDefault();
+            event.stopPropagation();
+            const char = event.shiftKey ? chars[1] : chars[0];
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(encoder.encode(char));
+            }
+          }
+        }
+      };
+      container.addEventListener("keydown", onKeyDown, true);
+
       term.open(container);
       fitAddon.fit();
 
       const currentTerm = term;
-      const encoder = new TextEncoder();
 
       // Respond to kitty keyboard protocol queries from Claude Code.
       // When Claude Code starts, it queries/enables the kitty protocol via CSI sequences.
@@ -145,19 +184,6 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         kittyModeFlags = 0;
         return false;
       });
-
-      // Intercept Shift+Enter at the DOM level (capture phase) to fully prevent
-      // xterm.js from also sending \r. Send kitty protocol escape sequence instead.
-      const onKeyDown = (event: KeyboardEvent) => {
-        if (event.key === "Enter" && event.shiftKey) {
-          event.preventDefault();
-          event.stopPropagation();
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(encoder.encode("\x1b[13;2u"));
-          }
-        }
-      };
-      container.addEventListener("keydown", onKeyDown, true);
 
       connectWs(currentTerm, fitAddon, encoder);
 
