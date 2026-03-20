@@ -55,6 +55,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       keyToReplay: string | null;
     } | null = null;
     let compEndTimer: ReturnType<typeof setTimeout>;
+    let replayTimer: ReturnType<typeof setTimeout>;
 
     const wsUrl =
       wsBaseUrl ?? `ws://${window.location.host}/ws/sessions/${sessionId}`;
@@ -95,7 +96,8 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         // compositionend, and replay the swallowed resolving key.
         if (compEndState && data === compEndState.data) {
           if (compEndState.firstPassed) {
-            // This is the WKWebView duplicate — suppress it.
+            // Duplicate arrived — suppress it, replay key now.
+            clearTimeout(replayTimer);
             const keyToReplay = compEndState.keyToReplay;
             compEndState = null;
             if (keyToReplay && currentWs.readyState === WebSocket.OPEN) {
@@ -104,6 +106,26 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
             return;
           }
           compEndState.firstPassed = true;
+          // Schedule replay with a short delay. If the WKWebView duplicate
+          // arrives it will cancel this and replay immediately. If the key
+          // arrives normally (Chrome) we cancel below. If neither happens
+          // (Safari UA suppressed duplicate but key still swallowed) the
+          // timer fires and replays.
+          if (compEndState.keyToReplay) {
+            replayTimer = setTimeout(() => {
+              if (!compEndState) return;
+              const keyToReplay = compEndState.keyToReplay;
+              compEndState = null;
+              if (keyToReplay && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(encoder.encode(keyToReplay));
+              }
+            }, 30);
+          }
+        } else if (compEndState?.keyToReplay && data === compEndState.keyToReplay) {
+          // The key arrived via normal xterm.js processing (not swallowed).
+          // Cancel the scheduled replay — it's not needed.
+          clearTimeout(replayTimer);
+          compEndState = null;
         }
 
         if (currentWs.readyState === WebSocket.OPEN) {
