@@ -41,6 +41,14 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     let alive = true;
     let intentionalClose = false;
 
+    // Workaround: WKWebView (Tauri/macOS) fires a duplicate input event after
+    // compositionend for dead keys (e.g. single quote, backtick), causing xterm.js
+    // to emit the character twice via onData. We track compositionend and suppress
+    // the second identical emission.
+    let compositionEndData: string | null = null;
+    let compositionFirstEmitted = false;
+    let compositionTimer: ReturnType<typeof setTimeout>;
+
     const wsUrl =
       wsBaseUrl ?? `ws://${window.location.host}/ws/sessions/${sessionId}`;
 
@@ -76,6 +84,19 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       };
 
       currentTerm.onData((data) => {
+        // Suppress duplicate dead-key emission from WKWebView (see compositionend handler)
+        if (compositionEndData !== null && data === compositionEndData) {
+          if (compositionFirstEmitted) {
+            compositionEndData = null;
+            compositionFirstEmitted = false;
+            return;
+          }
+          compositionFirstEmitted = true;
+        } else if (compositionEndData !== null) {
+          compositionEndData = null;
+          compositionFirstEmitted = false;
+        }
+
         if (currentWs.readyState === WebSocket.OPEN) {
           currentWs.send(encoder.encode(data));
         }
@@ -113,6 +134,20 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       const unicodeAddon = new Unicode11Addon();
       term.loadAddon(unicodeAddon);
       term.unicode.activeVersion = "11";
+
+      // Register compositionend handler in capture phase on the container BEFORE
+      // term.open() so it fires before xterm.js processes the event.
+      const onCompositionEnd = ((e: CompositionEvent) => {
+        compositionEndData = e.data || null;
+        compositionFirstEmitted = false;
+        clearTimeout(compositionTimer);
+        compositionTimer = setTimeout(() => {
+          compositionEndData = null;
+          compositionFirstEmitted = false;
+        }, 100);
+      }) as EventListener;
+      container.addEventListener("compositionend", onCompositionEnd, true);
+
       term.open(container);
       fitAddon.fit();
 
