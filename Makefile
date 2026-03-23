@@ -52,6 +52,7 @@ install-service: backend
 	cp backend/bin/cmux $(BIN_DEST)
 	sed 's|__HOME__|$(HOME)|g' $(PLIST_SRC) > $(PLIST_DEST)
 	-launchctl bootout $(SERVICE_TARGET) 2>/dev/null
+	@while launchctl print $(SERVICE_TARGET) >/dev/null 2>&1; do sleep 0.2; done
 	launchctl bootstrap gui/$(shell id -u) $(PLIST_DEST)
 	@echo "cmux service installed and started"
 
@@ -64,6 +65,7 @@ uninstall-service:
 restart-service: backend
 	cp backend/bin/cmux $(BIN_DEST)
 	-launchctl bootout $(SERVICE_TARGET) 2>/dev/null
+	@while launchctl print $(SERVICE_TARGET) >/dev/null 2>&1; do sleep 0.2; done
 	launchctl bootstrap gui/$(shell id -u) $(PLIST_DEST)
 	@echo "cmux service restarted"
 
