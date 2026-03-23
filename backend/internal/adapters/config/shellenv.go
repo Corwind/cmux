@@ -88,7 +88,7 @@ func MergeEnv(base, overlay []string) []string {
 }
 
 func captureLoginEnv(shell string) ([]string, error) {
-	cmd := exec.Command(shell, "-l", "-c", "env")
+	cmd := exec.Command(shell, "-li", "-c", "env")
 	cmd.Stdin = nil
 
 	out, err := runWithTimeout(cmd, 10*time.Second)
