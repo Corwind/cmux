@@ -107,6 +107,7 @@ The backend follows **hexagonal architecture** with clear boundaries:
 git clone https://github.com/Corwind/cmux.git
 cd cmux
 make install   # install Go + npm dependencies
+make build     # build the project
 make dev       # start backend (port 3001) + frontend (port 5173)
 ```
 
