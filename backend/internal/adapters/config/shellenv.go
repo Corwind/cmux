@@ -105,9 +105,9 @@ func captureWithInitFiles(shell string, initFiles []string) ([]string, error) {
 		parts = append(parts, "source "+shellQuote(f))
 	}
 	parts = append(parts, "env")
-	script := strings.Join(parts, " && ")
+	script := strings.Join(parts, "; ")
 
-	cmd := exec.Command(shell, "-c", script)
+	cmd := exec.Command(shell, "-li", "-c", script)
 	cmd.Stdin = nil
 
 	out, err := runWithTimeout(cmd, 10*time.Second)
