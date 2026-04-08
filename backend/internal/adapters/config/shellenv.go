@@ -88,7 +88,7 @@ func MergeEnv(base, overlay []string) []string {
 }
 
 func captureLoginEnv(shell string) ([]string, error) {
-	cmd := exec.Command(shell, "-li", "-c", "env")
+	cmd := exec.Command(shell, "-l", "-c", "env")
 	cmd.Stdin = nil
 
 	out, err := runWithTimeout(cmd, 10*time.Second)
@@ -107,7 +107,7 @@ func captureWithInitFiles(shell string, initFiles []string) ([]string, error) {
 	parts = append(parts, "env")
 	script := strings.Join(parts, "; ")
 
-	cmd := exec.Command(shell, "-li", "-c", script)
+	cmd := exec.Command(shell, "-l", "-c", script)
 	cmd.Stdin = nil
 
 	out, err := runWithTimeout(cmd, 10*time.Second)
