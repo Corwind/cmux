@@ -38,6 +38,7 @@ func main() {
 	seedTemplates(templateService, cfg.Sandbox.TemplateDir)
 
 	builder := sandbox.NewProfileBuilder(cfg.Sandbox.TemplateDir)
+	log.Printf("resolving shell environment...")
 	envCache := configadapter.NewEnvCache(func() []string {
 		return configadapter.ResolveShellEnv(cfg)
 	}, 5*time.Minute)

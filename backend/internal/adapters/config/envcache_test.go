@@ -24,18 +24,14 @@ func TestEnvCacheServesFromCache(t *testing.T) {
 	if callCount.Load() != 1 {
 		t.Errorf("expected resolver called once, got %d", callCount.Load())
 	}
-	if len(env1) != 1 || env1[0] != "FOO=bar" {
-		t.Errorf("unexpected env: %v", env1)
-	}
-	if len(env2) != 1 || env2[0] != "FOO=bar" {
-		t.Errorf("unexpected env: %v", env2)
-	}
-	if len(env3) != 1 || env3[0] != "FOO=bar" {
-		t.Errorf("unexpected env: %v", env3)
+	for _, env := range [][]string{env1, env2, env3} {
+		if len(env) != 1 || env[0] != "FOO=bar" {
+			t.Errorf("unexpected env: %v", env)
+		}
 	}
 }
 
-func TestEnvCacheRefreshesAfterTTL(t *testing.T) {
+func TestEnvCacheReturnsStaleAndRefreshesInBackground(t *testing.T) {
 	var callCount atomic.Int32
 	resolver := func() []string {
 		n := callCount.Add(1)
@@ -51,9 +47,18 @@ func TestEnvCacheRefreshesAfterTTL(t *testing.T) {
 
 	time.Sleep(60 * time.Millisecond)
 
+	// After TTL, Get returns stale value and triggers background refresh
 	env2 := cache.Get()
-	if env2[0] != "CALL=2" {
-		t.Errorf("expected CALL=2, got %s", env2[0])
+	if env2[0] != "CALL=1" {
+		t.Errorf("expected stale CALL=1, got %s", env2[0])
+	}
+
+	// Wait for background refresh to complete
+	time.Sleep(50 * time.Millisecond)
+
+	env3 := cache.Get()
+	if env3[0] != "CALL=2" {
+		t.Errorf("expected CALL=2 after background refresh, got %s", env3[0])
 	}
 
 	if callCount.Load() != 2 {
@@ -107,41 +112,30 @@ func TestEnvCacheConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestEnvCacheBlocksUntilFirstResolution(t *testing.T) {
-	resolving := make(chan struct{})
+func TestEnvCacheConstructorBlocksUntilResolved(t *testing.T) {
+	resolved := make(chan struct{})
 	resolver := func() []string {
-		<-resolving
+		defer close(resolved)
+		time.Sleep(50 * time.Millisecond)
 		return []string{"READY=true"}
 	}
 
 	cache := NewEnvCache(resolver, 5*time.Minute)
 
-	done := make(chan []string, 1)
-	go func() {
-		done <- cache.Get()
-	}()
-
-	// Get() should be blocked
+	// Constructor has returned, so resolver must have completed
 	select {
-	case <-done:
-		t.Fatal("Get() returned before resolver completed")
-	case <-time.After(20 * time.Millisecond):
+	case <-resolved:
+	default:
+		t.Fatal("constructor returned before resolver completed")
 	}
 
-	// Unblock the resolver
-	close(resolving)
-
-	select {
-	case env := <-done:
-		if len(env) != 1 || env[0] != "READY=true" {
-			t.Errorf("unexpected env: %v", env)
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("Get() did not return after resolver completed")
+	env := cache.Get()
+	if len(env) != 1 || env[0] != "READY=true" {
+		t.Errorf("unexpected env: %v", env)
 	}
 }
 
-func TestEnvCacheTTLRefreshOnlyOnce(t *testing.T) {
+func TestEnvCacheBackgroundRefreshOnlyOnce(t *testing.T) {
 	var callCount atomic.Int32
 	resolver := func() []string {
 		n := callCount.Add(1)
@@ -151,7 +145,7 @@ func TestEnvCacheTTLRefreshOnlyOnce(t *testing.T) {
 
 	cache := NewEnvCache(resolver, 30*time.Millisecond)
 
-	_ = cache.Get() // initial
+	_ = cache.Get() // initial (already resolved in constructor)
 
 	time.Sleep(40 * time.Millisecond) // expire TTL
 
@@ -166,7 +160,33 @@ func TestEnvCacheTTLRefreshOnlyOnce(t *testing.T) {
 	}
 	wg.Wait()
 
+	// Wait for the single background refresh to complete
+	time.Sleep(50 * time.Millisecond)
+
 	if callCount.Load() != 2 {
 		t.Errorf("expected exactly 2 resolver calls (initial + 1 refresh), got %d", callCount.Load())
+	}
+}
+
+func TestEnvCacheGetNeverBlocks(t *testing.T) {
+	resolver := func() []string {
+		time.Sleep(100 * time.Millisecond)
+		return []string{"SLOW=true"}
+	}
+
+	cache := NewEnvCache(resolver, 10*time.Millisecond)
+
+	time.Sleep(20 * time.Millisecond) // expire TTL
+
+	// Get should return immediately with stale data, not block on refresh
+	start := time.Now()
+	env := cache.Get()
+	elapsed := time.Since(start)
+
+	if elapsed > 10*time.Millisecond {
+		t.Errorf("Get() took %s, expected near-instant return", elapsed)
+	}
+	if len(env) != 1 || env[0] != "SLOW=true" {
+		t.Errorf("unexpected env: %v", env)
 	}
 }

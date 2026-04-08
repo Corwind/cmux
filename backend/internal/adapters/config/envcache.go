@@ -6,69 +6,68 @@ import (
 	"time"
 )
 
-// EnvCache resolves shell environment variables eagerly in the background
-// at construction time and caches the result. Subsequent calls to Get
-// return the cached value until the TTL expires, avoiding a shell spawn
-// on every session creation.
+// EnvCache resolves shell environment variables once at construction time
+// and caches the result. After the TTL expires, the next call to Get returns
+// the stale cached value and triggers a background refresh, so callers are
+// never blocked by a shell spawn.
 type EnvCache struct {
-	mu         sync.RWMutex
-	env        []string
-	resolvedAt time.Time
-	ttl        time.Duration
-	resolver   func() []string
-	ready      chan struct{} // closed after first background resolution
+	mu          sync.RWMutex
+	env         []string
+	resolvedAt  time.Time
+	ttl         time.Duration
+	resolver    func() []string
+	refreshing  bool // true while a background refresh is in flight
 }
 
-// NewEnvCache creates a cache that immediately starts resolving the shell
-// environment in a background goroutine. The result is cached for ttl.
+// NewEnvCache creates a cache and synchronously resolves the shell environment.
+// This blocks until the first resolution completes, guaranteeing that Get
+// never has to wait.
 func NewEnvCache(resolver func() []string, ttl time.Duration) *EnvCache {
 	c := &EnvCache{
 		ttl:      ttl,
 		resolver: resolver,
-		ready:    make(chan struct{}),
 	}
-	go c.warmUp()
+
+	start := time.Now()
+	c.env = resolver()
+	c.resolvedAt = time.Now()
+	log.Printf("shell env resolved in %s (%d vars)", time.Since(start), len(c.env))
+
 	return c
 }
 
-func (c *EnvCache) warmUp() {
+// Get returns the cached environment. It never blocks on shell resolution.
+// When the TTL has expired it returns the stale value and kicks off a
+// background refresh.
+func (c *EnvCache) Get() []string {
+	c.mu.RLock()
+	env := c.env
+	expired := time.Since(c.resolvedAt) >= c.ttl
+	refreshing := c.refreshing
+	c.mu.RUnlock()
+
+	if expired && !refreshing {
+		c.mu.Lock()
+		// Double-check: another goroutine may have started a refresh.
+		if time.Since(c.resolvedAt) >= c.ttl && !c.refreshing {
+			c.refreshing = true
+			go c.backgroundRefresh()
+		}
+		c.mu.Unlock()
+	}
+
+	return env
+}
+
+func (c *EnvCache) backgroundRefresh() {
 	start := time.Now()
 	env := c.resolver()
 
 	c.mu.Lock()
 	c.env = env
 	c.resolvedAt = time.Now()
+	c.refreshing = false
 	c.mu.Unlock()
 
-	close(c.ready)
-	log.Printf("shell env pre-warmed in %s (%d vars)", time.Since(start), len(env))
-}
-
-// Get returns the cached environment. It blocks until the initial background
-// resolution completes. After the TTL expires, it resolves fresh inline.
-func (c *EnvCache) Get() []string {
-	<-c.ready
-
-	c.mu.RLock()
-	if time.Since(c.resolvedAt) < c.ttl {
-		env := c.env
-		c.mu.RUnlock()
-		return env
-	}
-	c.mu.RUnlock()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Double-check: another goroutine may have refreshed while we waited.
-	if time.Since(c.resolvedAt) < c.ttl {
-		return c.env
-	}
-
-	start := time.Now()
-	c.env = c.resolver()
-	c.resolvedAt = time.Now()
-	log.Printf("shell env refreshed in %s (%d vars)", time.Since(start), len(c.env))
-
-	return c.env
+	log.Printf("shell env refreshed in %s (%d vars)", time.Since(start), len(env))
 }
