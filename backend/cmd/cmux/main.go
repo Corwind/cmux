@@ -38,9 +38,11 @@ func main() {
 	seedTemplates(templateService, cfg.Sandbox.TemplateDir)
 
 	builder := sandbox.NewProfileBuilder(cfg.Sandbox.TemplateDir)
-	managerOpts := []pty.Option{pty.WithSandbox(builder), pty.WithEnvResolver(func() []string {
+	log.Printf("resolving shell environment...")
+	envCache := configadapter.NewEnvCache(func() []string {
 		return configadapter.ResolveShellEnv(cfg)
-	})}
+	}, 5*time.Minute)
+	managerOpts := []pty.Option{pty.WithSandbox(builder), pty.WithEnvResolver(envCache.Get)}
 
 	if len(cfg.Sandbox.Templates) > 0 {
 		managerOpts = append(managerOpts, pty.WithSandboxTemplates(cfg.Sandbox.Templates...))
