@@ -26,9 +26,6 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	baseEnv := configadapter.ResolveShellEnv(cfg)
-	log.Printf("resolved %d env vars for spawned processes", len(baseEnv))
-
 	repo, err := sqlite.NewRepository(cfg.Server.DBPath)
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
@@ -41,7 +38,9 @@ func main() {
 	seedTemplates(templateService, cfg.Sandbox.TemplateDir)
 
 	builder := sandbox.NewProfileBuilder(cfg.Sandbox.TemplateDir)
-	managerOpts := []pty.Option{pty.WithSandbox(builder), pty.WithEnv(baseEnv)}
+	managerOpts := []pty.Option{pty.WithSandbox(builder), pty.WithEnvResolver(func() []string {
+		return configadapter.ResolveShellEnv(cfg)
+	})}
 
 	if len(cfg.Sandbox.Templates) > 0 {
 		managerOpts = append(managerOpts, pty.WithSandboxTemplates(cfg.Sandbox.Templates...))

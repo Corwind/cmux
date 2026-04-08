@@ -52,12 +52,19 @@ func WithEnv(env []string) Option {
 	}
 }
 
+func WithEnvResolver(fn func() []string) Option {
+	return func(m *Manager) {
+		m.envResolver = fn
+	}
+}
+
 type Manager struct {
 	mu               sync.RWMutex
 	processes        map[int]*managedProcess
 	command          string
 	fixedArgs        []string
 	baseEnv          []string
+	envResolver      func() []string
 	sandboxBuilder   *sandbox.ProfileBuilder
 	sandboxTemplates []string
 	sandboxContent   []string
@@ -99,11 +106,15 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	}
 
 	cmd.Dir = resolvedDir
-	if m.baseEnv != nil {
-		cmd.Env = filterEnv(m.baseEnv, "CLAUDECODE")
+	var env []string
+	if m.envResolver != nil {
+		env = m.envResolver()
+	} else if m.baseEnv != nil {
+		env = m.baseEnv
 	} else {
-		cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
+		env = os.Environ()
 	}
+	cmd.Env = filterEnv(env, "CLAUDECODE")
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 	cmd.Env = append(cmd.Env, "LANG=en_US.UTF-8")
 

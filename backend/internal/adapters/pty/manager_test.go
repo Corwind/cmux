@@ -2,6 +2,7 @@ package pty
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -233,6 +234,58 @@ func TestWithEnvFiltersCLAUDECODE(t *testing.T) {
 	}
 	if !contains(output, "KEEP=yes") {
 		t.Fatalf("expected KEEP=yes in output, got: %s", output)
+	}
+}
+
+func TestWithEnvResolverOption(t *testing.T) {
+	resolver := func() []string { return []string{"DYNAMIC=value"} }
+	m := NewManager(WithEnvResolver(resolver))
+	if m.envResolver == nil {
+		t.Fatal("expected envResolver to be set")
+	}
+	got := m.envResolver()
+	if len(got) != 1 || got[0] != "DYNAMIC=value" {
+		t.Fatalf("expected [DYNAMIC=value], got %v", got)
+	}
+}
+
+func TestWithEnvResolverTakesPrecedenceOverWithEnv(t *testing.T) {
+	resolver := func() []string { return []string{"RESOLVED=new"} }
+	m := NewManager(
+		WithEnv([]string{"STATIC=old"}),
+		WithEnvResolver(resolver),
+	)
+	if m.baseEnv == nil {
+		t.Fatal("expected baseEnv to be set")
+	}
+	if len(m.baseEnv) != 1 || m.baseEnv[0] != "STATIC=old" {
+		t.Fatalf("expected baseEnv [STATIC=old], got %v", m.baseEnv)
+	}
+	if m.envResolver == nil {
+		t.Fatal("expected envResolver to be set")
+	}
+	got := m.envResolver()
+	if len(got) != 1 || got[0] != "RESOLVED=new" {
+		t.Fatalf("expected resolver to return [RESOLVED=new], got %v", got)
+	}
+}
+
+func TestWithEnvResolverCalledEachTime(t *testing.T) {
+	counter := 0
+	resolver := func() []string {
+		counter++
+		return []string{fmt.Sprintf("CALL=%d", counter)}
+	}
+	m := NewManager(WithEnvResolver(resolver))
+
+	first := m.envResolver()
+	second := m.envResolver()
+
+	if len(first) != 1 || first[0] != "CALL=1" {
+		t.Fatalf("expected first call [CALL=1], got %v", first)
+	}
+	if len(second) != 1 || second[0] != "CALL=2" {
+		t.Fatalf("expected second call [CALL=2], got %v", second)
 	}
 }
 
