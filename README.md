@@ -101,25 +101,47 @@ The backend follows **hexagonal architecture** with clear boundaries:
 - 📦 [Node.js](https://nodejs.org/) 20+
 - 🤖 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 
-### Run it
+### Install & run
 
 ```bash
 git clone https://github.com/Corwind/cmux.git
 cd cmux
-make install   # install Go + npm dependencies
-make build     # build the project
-make dev       # start backend (port 3001) + frontend (port 5173)
+make install           # install Go + npm dependencies
+make install-service   # build, codesign, and start the launchd service
 ```
 
-Then open **http://localhost:5173** 🎉
+Create a config file at `~/.cmux/config.toml` so spawned sessions inherit your shell environment:
+
+```toml
+[server]
+port = "3001"
+db_path = "~/.cmux/cmux.db"
+
+[sandbox]
+template_dir = "~/.cmux/sandbox-templates"
+templates = []
+
+[shell]
+path = "/bin/zsh"
+init_files = ["~/.zshrc", "~/.zprofile"]
+
+[env]
+```
+
+Then open **http://localhost:3001** 🎉
+
+The service starts automatically on login and restarts if it crashes.
 
 ### Other commands
 
 ```bash
-make build     # production build (Go binary + Vite bundle)
-make test      # run all tests (Go + Vitest)
-make lint      # lint everything (golangci-lint + ESLint)
-make clean     # remove build artifacts
+make restart-service   # rebuild and restart the service
+make uninstall-service # stop and remove the service
+make service-logs      # tail -f ~/.cmux/cmux.log
+make dev               # run in foreground (backend :3001 + frontend :5173)
+make test              # run all tests (Go + Vitest)
+make lint              # lint everything (golangci-lint + ESLint)
+make clean             # remove build artifacts
 ```
 
 ## 📡 API
