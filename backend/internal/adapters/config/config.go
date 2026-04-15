@@ -64,7 +64,7 @@ func Load() (domain.Config, error) {
 func defaults() domain.Config {
 	return domain.Config{
 		Server: domain.ServerConfig{
-			Port:   "3001",
+			Port:   "2689",
 			DBPath: "db/cmux.db",
 		},
 		Sandbox: domain.SandboxConfig{

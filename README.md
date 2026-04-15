@@ -114,7 +114,7 @@ Create a config file at `~/.cmux/config.toml` so spawned sessions inherit your s
 
 ```toml
 [server]
-port = "3001"
+port = "2689"
 db_path = "~/.cmux/cmux.db"
 
 [sandbox]
@@ -128,7 +128,7 @@ init_files = ["~/.zshrc", "~/.zprofile"]
 [env]
 ```
 
-Then open **http://localhost:3001** 🎉
+Then open **http://localhost:2689** 🎉
 
 The service starts automatically on login and restarts if it crashes.
 
@@ -138,7 +138,7 @@ The service starts automatically on login and restarts if it crashes.
 make restart-service   # rebuild and restart the service
 make uninstall-service # stop and remove the service
 make service-logs      # tail -f ~/.cmux/cmux.log
-make dev               # run in foreground (backend :3001 + frontend :5173)
+make dev               # run in foreground (backend :2689 + frontend :5173)
 make test              # run all tests (Go + Vitest)
 make lint              # lint everything (golangci-lint + ESLint)
 make clean             # remove build artifacts
@@ -175,7 +175,7 @@ cmux can be configured via a TOML file at `~/.cmux/config.toml`. This is especia
 
 ```toml
 [server]
-port = "3001"
+port = "2689"
 db_path = "~/.cmux/cmux.db"
 
 [sandbox]
