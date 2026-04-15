@@ -19,8 +19,8 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
-	if cfg.Server.Port != "3001" {
-		t.Errorf("expected default port '3001', got %q", cfg.Server.Port)
+	if cfg.Server.Port != "2689" {
+		t.Errorf("expected default port '2689', got %q", cfg.Server.Port)
 	}
 	if cfg.Server.DBPath != "db/cmux.db" {
 		t.Errorf("expected default db_path 'db/cmux.db', got %q", cfg.Server.DBPath)

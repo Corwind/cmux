@@ -53,7 +53,7 @@ func main() {
 	fileBrowser := filesystem.NewBrowser()
 	sessionService := appservice.NewSessionService(repo, processManager, templateRepo)
 
-	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser)
+	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, cfg.Server.Port)
 
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	server := &http.Server{

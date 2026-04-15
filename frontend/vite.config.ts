@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react-swc";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "url";
 
+const apiPort = process.env.CMUX_PORT || "2689";
+const apiTarget = `http://localhost:${apiPort}`;
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -18,9 +21,9 @@ export default defineConfig({
     port: 5173,
     host: true,
     proxy: {
-      "/api": "http://localhost:3001",
+      "/api": apiTarget,
       "/ws": {
-        target: "http://localhost:3001",
+        target: apiTarget,
         ws: true,
       },
     },

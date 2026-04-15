@@ -148,7 +148,7 @@ Copy `.env.example` to `.env` and configure:
 
 | Variable            | Description       | Default                     |
 | ------------------- | ----------------- | --------------------------- |
-| `VITE_API_BASE_URL` | API base URL      | `http://localhost:3001/api` |
+| `VITE_API_BASE_URL` | API base URL      | `http://localhost:2689/api` |
 | `VITE_APP_TITLE`    | Application title | Project title               |
 
 ## Docker

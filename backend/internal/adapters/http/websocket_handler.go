@@ -53,7 +53,7 @@ func NewWebSocketHandler(service *app.SessionService, opts ...WebSocketOption) *
 	h := &WebSocketHandler{
 		service:        service,
 		bridges:        make(map[string]*ptyBridge),
-		originPatterns: []string{"localhost:5173", "localhost:3001"},
+		originPatterns: []string{"*"},
 	}
 	for _, opt := range opts {
 		opt(h)

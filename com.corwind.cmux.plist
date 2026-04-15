@@ -15,7 +15,7 @@
         <key>CMUX_DB_PATH</key>
         <string>__HOME__/.cmux/cmux.db</string>
         <key>CMUX_PORT</key>
-        <string>3001</string>
+        <string>2689</string>
         <key>HOME</key>
         <string>__HOME__</string>
         <key>PATH</key>
