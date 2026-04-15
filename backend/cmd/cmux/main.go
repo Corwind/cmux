@@ -18,6 +18,7 @@ import (
 	"github.com/Corwind/cmux/backend/internal/adapters/pty"
 	"github.com/Corwind/cmux/backend/internal/adapters/pty/sandbox"
 	"github.com/Corwind/cmux/backend/internal/adapters/sqlite"
+	"github.com/Corwind/cmux/backend/defaultprofiles"
 )
 
 func main() {
@@ -34,8 +35,8 @@ func main() {
 	templateRepo := sqlite.NewTemplateRepository(repo.DB())
 	templateService := appservice.NewTemplateService(templateRepo)
 
-	// Seed templates from sandbox-profiles directory if none exist
-	seedTemplates(templateService, cfg.Sandbox.TemplateDir)
+	// Seed templates from embedded sandbox-profiles if none exist
+	seedTemplates(templateService)
 
 	builder := sandbox.NewProfileBuilder(cfg.Sandbox.TemplateDir)
 	log.Printf("resolving shell environment...")
@@ -89,7 +90,7 @@ func main() {
 	log.Printf("cmux stopped")
 }
 
-func seedTemplates(svc *appservice.TemplateService, profileDir string) {
+func seedTemplates(svc *appservice.TemplateService) {
 	ctx := context.Background()
 	templates, err := svc.ListTemplates(ctx)
 	if err != nil {
@@ -100,9 +101,9 @@ func seedTemplates(svc *appservice.TemplateService, profileDir string) {
 		return
 	}
 
-	entries, err := os.ReadDir(profileDir)
+	entries, err := defaultprofiles.Embedded.ReadDir(".")
 	if err != nil {
-		log.Printf("no sandbox-profiles directory found, skipping template seeding")
+		log.Printf("failed to read embedded sandbox profiles: %v", err)
 		return
 	}
 
@@ -111,9 +112,9 @@ func seedTemplates(svc *appservice.TemplateService, profileDir string) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sbpl") {
 			continue
 		}
-		data, err := os.ReadFile(fmt.Sprintf("%s/%s", profileDir, entry.Name()))
+		data, err := defaultprofiles.Embedded.ReadFile(entry.Name())
 		if err != nil {
-			log.Printf("failed to read %s: %v", entry.Name(), err)
+			log.Printf("failed to read embedded %s: %v", entry.Name(), err)
 			continue
 		}
 		content := string(data)
