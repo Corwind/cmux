@@ -46,7 +46,7 @@ SERVICE_TARGET := gui/$(shell id -u)/com.corwind.cmux
 BIN_DEST     := $(HOME)/.local/bin/cmux
 DATA_DIR     := $(HOME)/.cmux
 
-install-service: backend
+install-service: build
 	@mkdir -p $(DATA_DIR)
 	@mkdir -p $(dir $(BIN_DEST))
 	cp backend/bin/cmux $(BIN_DEST)
@@ -62,7 +62,7 @@ uninstall-service:
 	-rm -f $(BIN_DEST)
 	@echo "cmux service uninstalled"
 
-restart-service: backend
+restart-service: build
 	cp backend/bin/cmux $(BIN_DEST)
 	-launchctl bootout $(SERVICE_TARGET) 2>/dev/null
 	@while launchctl print $(SERVICE_TARGET) >/dev/null 2>&1; do sleep 0.2; done
