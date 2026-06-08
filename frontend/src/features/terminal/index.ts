@@ -1,6 +1,7 @@
 export { Terminal } from "./components/Terminal";
 export { ThemePicker } from "./components/ThemePicker";
-export { useTerminalThemeStore } from "./stores/terminal-theme.store";
+export { FontFamilyPicker } from "./components/FontFamilyPicker";
+export { useTerminalThemeStore, DEFAULT_FONT_FAMILY } from "./stores/terminal-theme.store";
 export { useThemeVars } from "./hooks/useThemeVars";
 export {
   terminalThemes,

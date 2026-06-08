@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { ThemePicker } from "@/features/terminal";
+import { ThemePicker, FontFamilyPicker } from "@/features/terminal";
 
 interface SettingsModalProps {
   open: boolean;
@@ -74,7 +74,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           </button>
         </div>
 
-        <ThemePicker />
+        <div className="space-y-5">
+          <FontFamilyPicker />
+          <ThemePicker />
+        </div>
       </div>
     </dialog>
   );
