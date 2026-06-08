@@ -3,6 +3,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { getTerminalTheme } from "../themes";
 import { useTerminalThemeStore } from "../stores/terminal-theme.store";
 import "@xterm/xterm/css/xterm.css";
@@ -17,14 +18,21 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
   const termRef = useRef<XTerm | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const themeId = useTerminalThemeStore((s) => s.themeId);
+  const fontFamily = useTerminalThemeStore((s) => s.fontFamily);
 
-  // Apply theme changes to a running terminal without remounting
+  // Apply theme/font changes to a running terminal without remounting
   useEffect(() => {
     if (termRef.current) {
       const { theme } = getTerminalTheme(themeId);
       termRef.current.options.theme = theme;
     }
   }, [themeId]);
+
+  useEffect(() => {
+    if (termRef.current) {
+      termRef.current.options.fontFamily = fontFamily;
+    }
+  }, [fontFamily]);
 
   useEffect(() => {
     // Clean up previous instance immediately
@@ -97,11 +105,12 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       }
 
       const { theme } = getTerminalTheme(useTerminalThemeStore.getState().themeId);
+      const currentFontFamily = useTerminalThemeStore.getState().fontFamily;
 
       term = new XTerm({
         cursorBlink: true,
         fontSize: 14,
-        fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+        fontFamily: currentFontFamily,
         theme,
         allowProposedApi: true,
       });
@@ -115,6 +124,17 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       term.loadAddon(unicodeAddon);
       term.unicode.activeVersion = "11";
       term.open(container);
+
+      // WebGL renderer: better glyph positioning and font-fallback accuracy,
+      // fixes spacing issues with Powerline/Nerd Font glyphs and symbols like ⎇.
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        term.loadAddon(webgl);
+      } catch {
+        // WebGL unavailable (headless, older GPU) — fall back to canvas renderer
+      }
+
       fitAddon.fit();
 
       const currentTerm = term;
