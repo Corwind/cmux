@@ -29,6 +29,7 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 	templateHandler := NewTemplateHandler(templateService)
 	fsHandler := NewFilesystemHandler(fileBrowser)
 	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}))
+	openHandler := NewOpenHandler()
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/sessions", sessionHandler.List)
@@ -49,6 +50,7 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 		r.Get("/templates/{id}/export", templateHandler.Export)
 
 		r.Get("/fs", fsHandler.ListDirectory)
+		r.Post("/open", openHandler.Handle)
 	})
 
 	r.Get("/ws/sessions/{id}", wsHandler.Handle)

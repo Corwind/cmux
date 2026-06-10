@@ -81,6 +81,8 @@ func buildProfile(templateFragments []string) string {
 	b.WriteString("(allow sysctl-read)\n")
 	b.WriteString("(allow ipc-posix-shm*)\n")
 	b.WriteString("(allow user-preference-read)\n")
+	// Allow `open https://...` to hand URLs off to the browser via Launch Services
+	b.WriteString("(allow appleevent-send)\n")
 
 	// Network (Claude Code needs to call Anthropic API)
 	b.WriteString("\n;; network\n")

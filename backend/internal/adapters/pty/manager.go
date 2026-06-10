@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -16,8 +17,9 @@ import (
 )
 
 type managedProcess struct {
-	handle *ports.PTYHandle
-	cmd    *exec.Cmd
+	handle     *ports.PTYHandle
+	cmd        *exec.Cmd
+	wrapperDir string
 }
 
 type Option func(*Manager)
@@ -114,12 +116,27 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	} else {
 		env = os.Environ()
 	}
-	cmd.Env = filterEnv(env, "CLAUDECODE")
-	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
-	cmd.Env = append(cmd.Env, "LANG=en_US.UTF-8")
+	env = filterEnv(env, "CLAUDECODE")
+	env = append(env, "TERM=xterm-256color")
+	env = append(env, "LANG=en_US.UTF-8")
+
+	// Install a per-session `open` wrapper so sandboxed Claude can open URLs
+	// in the host browser via POST /api/open (Apple Events are blocked inside
+	// sandbox-exec, so the real /usr/bin/open can't communicate with the browser).
+	wrapperDir, wrapErr := installOpenWrapper(env)
+	if wrapErr != nil {
+		log.Printf("failed to install open wrapper: %v", wrapErr)
+	} else {
+		env = prependToPath(env, wrapperDir)
+	}
+
+	cmd.Env = env
 
 	ptmx, err := ptylib.Start(cmd)
 	if err != nil {
+		if wrapperDir != "" {
+			_ = os.RemoveAll(wrapperDir)
+		}
 		return nil, fmt.Errorf("failed to start PTY: %w", err)
 	}
 
@@ -135,7 +152,7 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	}
 
 	m.mu.Lock()
-	m.processes[handle.PID] = &managedProcess{handle: handle, cmd: cmd}
+	m.processes[handle.PID] = &managedProcess{handle: handle, cmd: cmd, wrapperDir: wrapperDir}
 	m.mu.Unlock()
 
 	return handle, nil
@@ -179,6 +196,9 @@ func (m *Manager) Kill(pid int) error {
 		return fmt.Errorf("process %d not found", pid)
 	}
 
+	if proc.wrapperDir != "" {
+		_ = os.RemoveAll(proc.wrapperDir)
+	}
 	if err := proc.handle.PTY.Close(); err != nil {
 		log.Printf("failed to close PTY for pid %d: %v", pid, err)
 	}
@@ -195,11 +215,54 @@ func (m *Manager) KillAll() {
 	m.mu.Unlock()
 
 	for _, p := range procs {
+		if p.wrapperDir != "" {
+			_ = os.RemoveAll(p.wrapperDir)
+		}
 		if err := p.handle.PTY.Close(); err != nil {
 			log.Printf("failed to close PTY for pid %d: %v", p.handle.PID, err)
 		}
 		_ = p.cmd.Process.Signal(syscall.SIGTERM)
 	}
+}
+
+// installOpenWrapper writes a tiny shell script named `open` into a temp
+// directory and returns the directory path. The script proxies URL-open
+// requests to POST /api/open on the cmux backend, which runs outside the
+// sandbox and can invoke the real macOS `open` binary.
+func installOpenWrapper(env []string) (string, error) {
+	port := "2689"
+	for _, e := range env {
+		if strings.HasPrefix(e, "CMUX_PORT=") {
+			port = e[len("CMUX_PORT="):]
+			break
+		}
+	}
+
+	dir, err := os.MkdirTemp("", "cmux-open-*")
+	if err != nil {
+		return "", err
+	}
+
+	script := "#!/bin/sh\n" +
+		`curl -sf -X POST "http://127.0.0.1:` + port + `/api/open" --data-urlencode "url=$1" >/dev/null 2>&1` + "\n"
+
+	path := filepath.Join(dir, "open")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
+}
+
+// prependToPath inserts dir at the front of the PATH entry in env.
+func prependToPath(env []string, dir string) []string {
+	for i, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			env[i] = "PATH=" + dir + ":" + e[len("PATH="):]
+			return env
+		}
+	}
+	return append(env, "PATH="+dir+":/usr/bin:/bin")
 }
 
 func (m *Manager) IsAlive(pid int) bool {
