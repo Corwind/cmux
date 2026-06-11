@@ -33,3 +33,18 @@ export interface DirEntry {
   name: string;
   is_dir: boolean;
 }
+
+export interface WorktreeSessionSummary {
+  id: string;
+  name: string;
+  status: "running" | "stopped";
+}
+
+export interface WorktreeEntry {
+  id: string;
+  path: string;
+  branch: string;
+  repo_root: string;
+  created_at: string;
+  sessions: WorktreeSessionSummary[];
+}

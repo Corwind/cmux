@@ -10,6 +10,7 @@ import (
 
 	"github.com/Corwind/cmux/backend/internal/domain"
 	"github.com/Corwind/cmux/backend/internal/ports"
+	"github.com/google/uuid"
 )
 
 // WorktreeSpec describes how to create or attach a git worktree for a session.
@@ -53,6 +54,7 @@ type SessionService struct {
 	processManager ports.ProcessManager
 	templateRepo   ports.TemplateRepository
 	gitService     ports.GitService
+	worktreeRepo   ports.WorktreeRepository
 	worktreesDir   string
 	mu             sync.RWMutex
 }
@@ -75,6 +77,12 @@ func WithGitService(svc ports.GitService, worktreesDir string) SessionServiceOpt
 	return func(s *SessionService) {
 		s.gitService = svc
 		s.worktreesDir = worktreesDir
+	}
+}
+
+func WithWorktreeRepository(repo ports.WorktreeRepository) SessionServiceOption {
+	return func(s *SessionService) {
+		s.worktreeRepo = repo
 	}
 }
 
@@ -151,9 +159,35 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		return domain.Session{}, fmt.Errorf("failed to store session: %w", err)
 	}
 
+	if worktreeManaged && s.worktreeRepo != nil {
+		s.trackWorktreeSession(ctx, session)
+	}
+
 	go s.watchProcess(session.ID, handle)
 
 	return session, nil
+}
+
+// trackWorktreeSession creates or adopts a ManagedWorktree record for the given
+// session and links them via the junction table.
+func (s *SessionService) trackWorktreeSession(ctx context.Context, session domain.Session) {
+	wt, err := s.worktreeRepo.GetByPath(ctx, session.WorkingDir)
+	if err != nil {
+		wt = domain.ManagedWorktree{
+			ID:        uuid.New().String(),
+			Path:      session.WorkingDir,
+			Branch:    session.GitBranch,
+			RepoRoot:  session.RepoRoot,
+			CreatedAt: session.CreatedAt,
+		}
+		if createErr := s.worktreeRepo.Create(ctx, wt); createErr != nil {
+			log.Printf("failed to create worktree record for %s: %v", session.WorkingDir, createErr)
+			return
+		}
+	}
+	if linkErr := s.worktreeRepo.LinkSession(ctx, wt.ID, session.ID); linkErr != nil {
+		log.Printf("failed to link session %s to worktree %s: %v", session.ID, wt.ID, linkErr)
+	}
 }
 
 func (s *SessionService) applySandboxContent(ctx context.Context, templateID string) {
@@ -275,11 +309,23 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string, action Wo
 			if err := s.gitService.RemoveWorktree(session.RepoRoot, session.WorkingDir, false); err != nil {
 				return fmt.Errorf("remove worktree: %w", err)
 			}
+			if s.worktreeRepo != nil {
+				_ = s.worktreeRepo.DeleteByPath(ctx, session.WorkingDir)
+			}
 		case WorktreeActionForce:
 			if err := s.gitService.RemoveWorktree(session.RepoRoot, session.WorkingDir, true); err != nil {
 				return fmt.Errorf("force remove worktree: %w", err)
 			}
+			if s.worktreeRepo != nil {
+				_ = s.worktreeRepo.DeleteByPath(ctx, session.WorkingDir)
+			}
+		case WorktreeActionKeep:
+			if s.worktreeRepo != nil {
+				_ = s.worktreeRepo.UnlinkSession(ctx, id)
+			}
 		}
+	} else if s.worktreeRepo != nil {
+		_ = s.worktreeRepo.UnlinkSession(ctx, id)
 	}
 
 	return s.repo.Delete(ctx, id)
@@ -303,6 +349,85 @@ func (s *SessionService) GetPTYHandle(sessionID string) (*ports.PTYHandle, error
 
 func (s *SessionService) ResizePTY(pid int, rows, cols uint16) error {
 	return s.processManager.Resize(pid, rows, cols)
+}
+
+// ListWorktrees returns all managed worktrees with their associated sessions.
+// It also auto-adopts any worktree_managed sessions not yet in the worktrees table.
+func (s *SessionService) ListWorktrees(ctx context.Context) ([]domain.WorktreeEntry, error) {
+	if s.worktreeRepo == nil {
+		return nil, nil
+	}
+
+	allSessions, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, sess := range allSessions {
+		if sess.WorktreeManaged {
+			s.trackWorktreeSession(ctx, sess)
+		}
+	}
+
+	wts, err := s.worktreeRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make([]domain.WorktreeEntry, 0, len(wts))
+	for _, wt := range wts {
+		sessionIDs, _ := s.worktreeRepo.ListSessionIDs(ctx, wt.ID)
+		var sessions []domain.Session
+		for _, sid := range sessionIDs {
+			if sess, err := s.repo.Get(ctx, sid); err == nil {
+				sessions = append(sessions, sess)
+			}
+		}
+		entries = append(entries, domain.WorktreeEntry{
+			ManagedWorktree: wt,
+			Sessions:        sessions,
+		})
+	}
+	return entries, nil
+}
+
+// ErrWorktreeHasSessions is returned when trying to delete a worktree that
+// still has active sessions and force is not set.
+type ErrWorktreeHasSessions struct {
+	WorktreeID string
+	Count      int
+}
+
+func (e *ErrWorktreeHasSessions) Error() string {
+	return fmt.Sprintf("worktree %q still has %d session(s)", e.WorktreeID, e.Count)
+}
+
+// DeleteOrphanedWorktree removes a worktree that has no linked sessions.
+// Pass force=true to remove it even if sessions are still linked.
+func (s *SessionService) DeleteOrphanedWorktree(ctx context.Context, id string, force bool) error {
+	if s.worktreeRepo == nil {
+		return fmt.Errorf("worktree repository not configured")
+	}
+
+	wt, err := s.worktreeRepo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if !force {
+		sessionIDs, err := s.worktreeRepo.ListSessionIDs(ctx, id)
+		if err != nil {
+			return err
+		}
+		if len(sessionIDs) > 0 {
+			return &ErrWorktreeHasSessions{WorktreeID: id, Count: len(sessionIDs)}
+		}
+	}
+
+	if s.gitService != nil {
+		_ = s.gitService.RemoveWorktree(wt.RepoRoot, wt.Path, force)
+	}
+
+	return s.worktreeRepo.Delete(ctx, id)
 }
 
 func (s *SessionService) watchProcess(sessionID string, handle *ports.PTYHandle) {

@@ -32,8 +32,20 @@ func NewRepository(dbPath string) (*Repository, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+
 	if _, err := db.Exec(createSessionsTable); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	if _, err := db.Exec(createWorktreesTable); err != nil {
+		return nil, fmt.Errorf("failed to create worktrees table: %w", err)
+	}
+
+	if _, err := db.Exec(createWorktreeSessionsTable); err != nil {
+		return nil, fmt.Errorf("failed to create worktree_sessions table: %w", err)
 	}
 
 	if _, err := db.Exec(createTemplatesTable); err != nil {
@@ -132,4 +144,101 @@ func (r *Repository) DB() *sql.DB {
 
 func (r *Repository) Close() error {
 	return r.db.Close()
+}
+
+// Worktree repository methods
+
+// WorktreeRepository interface implementation
+
+func (r *Repository) CreateWorktree(ctx context.Context, wt domain.ManagedWorktree) error {
+	_, err := r.db.ExecContext(ctx,
+		"INSERT OR IGNORE INTO worktrees (id, path, branch, repo_root, created_at) VALUES (?, ?, ?, ?, ?)",
+		wt.ID, wt.Path, wt.Branch, wt.RepoRoot, wt.CreatedAt,
+	)
+	return err
+}
+
+func (r *Repository) ListWorktrees(ctx context.Context) ([]domain.ManagedWorktree, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT id, path, branch, repo_root, created_at FROM worktrees ORDER BY created_at DESC",
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var wts []domain.ManagedWorktree
+	for rows.Next() {
+		var wt domain.ManagedWorktree
+		if err := rows.Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.CreatedAt); err != nil {
+			return nil, err
+		}
+		wts = append(wts, wt)
+	}
+	return wts, rows.Err()
+}
+
+func (r *Repository) GetWorktree(ctx context.Context, id string) (domain.ManagedWorktree, error) {
+	var wt domain.ManagedWorktree
+	err := r.db.QueryRowContext(ctx,
+		"SELECT id, path, branch, repo_root, created_at FROM worktrees WHERE id = ?", id,
+	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.CreatedAt)
+	if err == sql.ErrNoRows {
+		return domain.ManagedWorktree{}, fmt.Errorf("worktree not found: %s", id)
+	}
+	return wt, err
+}
+
+func (r *Repository) GetWorktreeByPath(ctx context.Context, path string) (domain.ManagedWorktree, error) {
+	var wt domain.ManagedWorktree
+	err := r.db.QueryRowContext(ctx,
+		"SELECT id, path, branch, repo_root, created_at FROM worktrees WHERE path = ?", path,
+	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.CreatedAt)
+	if err == sql.ErrNoRows {
+		return domain.ManagedWorktree{}, fmt.Errorf("worktree not found: %s", path)
+	}
+	return wt, err
+}
+
+func (r *Repository) DeleteWorktree(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM worktrees WHERE id = ?", id)
+	return err
+}
+
+func (r *Repository) DeleteWorktreeByPath(ctx context.Context, path string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM worktrees WHERE path = ?", path)
+	return err
+}
+
+func (r *Repository) LinkWorktreeSession(ctx context.Context, worktreeID, sessionID string) error {
+	_, err := r.db.ExecContext(ctx,
+		"INSERT OR IGNORE INTO worktree_sessions (worktree_id, session_id) VALUES (?, ?)",
+		worktreeID, sessionID,
+	)
+	return err
+}
+
+func (r *Repository) UnlinkWorktreeSession(ctx context.Context, sessionID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM worktree_sessions WHERE session_id = ?", sessionID)
+	return err
+}
+
+func (r *Repository) ListWorktreeSessionIDs(ctx context.Context, worktreeID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT session_id FROM worktree_sessions WHERE worktree_id = ?", worktreeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
