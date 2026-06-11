@@ -4,52 +4,150 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
 	"github.com/Corwind/cmux/backend/internal/ports"
 )
 
+// WorktreeSpec describes how to create or attach a git worktree for a session.
+type WorktreeSpec struct {
+	RepoPath     string
+	Branch       string
+	BaseRef      string
+	CreateBranch bool
+	Path         string // if empty, computed from worktreesDir
+}
+
+// CreateSessionInput holds all parameters for creating a session.
+type CreateSessionInput struct {
+	Name            string
+	WorkingDir      string
+	TemplateID      string
+	SkipPermissions bool
+	Worktree        *WorktreeSpec
+}
+
+// WorktreeAction controls what happens to the worktree when a session is deleted.
+type WorktreeAction string
+
+const (
+	WorktreeActionKeep  WorktreeAction = "keep"
+	WorktreeActionRemove WorktreeAction = "remove"
+	WorktreeActionForce  WorktreeAction = "force"
+)
+
+// ErrWorktreeDirty is returned when trying to remove a dirty worktree without force.
+type ErrWorktreeDirty struct {
+	Path string
+}
+
+func (e *ErrWorktreeDirty) Error() string {
+	return fmt.Sprintf("worktree %q has uncommitted changes", e.Path)
+}
+
 type SessionService struct {
 	repo           ports.SessionRepository
 	processManager ports.ProcessManager
 	templateRepo   ports.TemplateRepository
+	gitService     ports.GitService
+	worktreesDir   string
 	mu             sync.RWMutex
 }
 
-func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, templateRepo ports.TemplateRepository) *SessionService {
-	return &SessionService{
+func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, templateRepo ports.TemplateRepository, opts ...SessionServiceOption) *SessionService {
+	s := &SessionService{
 		repo:           repo,
 		processManager: pm,
 		templateRepo:   templateRepo,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, name, workingDir, templateID string, skipPermissions bool) (domain.Session, error) {
-	session, err := domain.NewSession(name, workingDir)
+type SessionServiceOption func(*SessionService)
+
+func WithGitService(svc ports.GitService, worktreesDir string) SessionServiceOption {
+	return func(s *SessionService) {
+		s.gitService = svc
+		s.worktreesDir = worktreesDir
+	}
+}
+
+func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionInput) (domain.Session, error) {
+	workingDir := input.WorkingDir
+	var repoRoot, gitBranch string
+	var worktreeManaged bool
+
+	if input.Worktree != nil && s.gitService != nil {
+		spec := input.Worktree
+
+		// Validate repo
+		info, err := s.gitService.Info(spec.RepoPath)
+		if err != nil {
+			return domain.Session{}, fmt.Errorf("git info: %w", err)
+		}
+		if !info.IsRepo {
+			return domain.Session{}, fmt.Errorf("%q is not a git repository", spec.RepoPath)
+		}
+
+		// Compute worktree path
+		wtPath := spec.Path
+		if wtPath == "" {
+			safeBranch := strings.ReplaceAll(spec.Branch, "/", "-")
+			repoBase := filepath.Base(info.RepoRoot)
+			wtPath = filepath.Join(s.worktreesDir, repoBase, safeBranch)
+		}
+
+		wt, err := s.gitService.AddWorktree(info.RepoRoot, wtPath, spec.Branch, spec.BaseRef, spec.CreateBranch)
+		if err != nil {
+			return domain.Session{}, fmt.Errorf("create worktree: %w", err)
+		}
+
+		workingDir = wt.Path
+		repoRoot = info.RepoRoot
+		gitBranch = wt.Branch
+		worktreeManaged = true
+	}
+
+	session, err := domain.NewSession(input.Name, workingDir)
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
 	}
+	session.RepoRoot = repoRoot
+	session.GitBranch = gitBranch
+	session.WorktreeManaged = worktreeManaged
 
 	// Resolve sandbox template content
-	s.applySandboxContent(ctx, templateID)
+	s.applySandboxContent(ctx, input.TemplateID)
 
 	args := []string{"--session-id", session.ClaudeSessionID}
-	if skipPermissions {
+	if input.SkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 	handle, err := s.processManager.Spawn(ctx, workingDir, args...)
 	if err != nil {
+		// Best-effort cleanup of orphaned worktree
+		if worktreeManaged && s.gitService != nil {
+			_ = s.gitService.RemoveWorktree(repoRoot, workingDir, true)
+		}
 		return domain.Session{}, fmt.Errorf("failed to spawn process: %w", err)
 	}
 
 	session.PID = handle.PID
 	session.Status = domain.StatusRunning
-	session.TemplateID = templateID
-	session.SkipPermissions = skipPermissions
+	session.TemplateID = input.TemplateID
+	session.SkipPermissions = input.SkipPermissions
 
 	if err := s.repo.Create(ctx, session); err != nil {
 		_ = s.processManager.Kill(handle.PID)
+		if worktreeManaged && s.gitService != nil {
+			_ = s.gitService.RemoveWorktree(repoRoot, workingDir, true)
+		}
 		return domain.Session{}, fmt.Errorf("failed to store session: %w", err)
 	}
 
@@ -157,7 +255,7 @@ func (s *SessionService) ListSessions(ctx context.Context) ([]domain.Session, er
 	return sessions, nil
 }
 
-func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
+func (s *SessionService) DeleteSession(ctx context.Context, id string, action WorktreeAction) error {
 	session, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -165,6 +263,23 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 
 	if session.Status == domain.StatusRunning {
 		_ = s.processManager.Kill(session.PID)
+	}
+
+	if session.WorktreeManaged && s.gitService != nil {
+		switch action {
+		case WorktreeActionRemove:
+			clean, cleanErr := s.gitService.IsClean(session.WorkingDir)
+			if cleanErr == nil && !clean {
+				return &ErrWorktreeDirty{Path: session.WorkingDir}
+			}
+			if err := s.gitService.RemoveWorktree(session.RepoRoot, session.WorkingDir, false); err != nil {
+				return fmt.Errorf("remove worktree: %w", err)
+			}
+		case WorktreeActionForce:
+			if err := s.gitService.RemoveWorktree(session.RepoRoot, session.WorkingDir, true); err != nil {
+				return fmt.Errorf("force remove worktree: %w", err)
+			}
+		}
 	}
 
 	return s.repo.Delete(ctx, id)

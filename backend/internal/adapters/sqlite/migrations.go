@@ -21,6 +21,18 @@ const addSkipPermissionsToSessions = `
 ALTER TABLE sessions ADD COLUMN skip_permissions INTEGER NOT NULL DEFAULT 0;
 `
 
+const addRepoRootToSessions = `
+ALTER TABLE sessions ADD COLUMN repo_root TEXT NOT NULL DEFAULT '';
+`
+
+const addGitBranchToSessions = `
+ALTER TABLE sessions ADD COLUMN git_branch TEXT NOT NULL DEFAULT '';
+`
+
+const addWorktreeManagedToSessions = `
+ALTER TABLE sessions ADD COLUMN worktree_managed INTEGER NOT NULL DEFAULT 0;
+`
+
 const createTemplatesTable = `
 CREATE TABLE IF NOT EXISTS sandbox_templates (
 	id TEXT PRIMARY KEY,

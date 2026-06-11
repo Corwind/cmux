@@ -4,6 +4,7 @@ type Config struct {
 	Server  ServerConfig
 	Sandbox SandboxConfig
 	Shell   ShellConfig
+	Git     GitConfig
 	Env     map[string]string
 }
 
@@ -20,4 +21,8 @@ type SandboxConfig struct {
 type ShellConfig struct {
 	Path      string
 	InitFiles []string
+}
+
+type GitConfig struct {
+	WorktreesDir string
 }

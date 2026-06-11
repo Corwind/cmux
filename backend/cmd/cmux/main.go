@@ -14,6 +14,7 @@ import (
 	appservice "github.com/Corwind/cmux/backend/internal/app"
 	configadapter "github.com/Corwind/cmux/backend/internal/adapters/config"
 	"github.com/Corwind/cmux/backend/internal/adapters/filesystem"
+	gitadapter "github.com/Corwind/cmux/backend/internal/adapters/git"
 	httpadapter "github.com/Corwind/cmux/backend/internal/adapters/http"
 	"github.com/Corwind/cmux/backend/internal/adapters/pty"
 	"github.com/Corwind/cmux/backend/internal/adapters/pty/sandbox"
@@ -51,9 +52,12 @@ func main() {
 
 	processManager := pty.NewManager(managerOpts...)
 	fileBrowser := filesystem.NewBrowser()
-	sessionService := appservice.NewSessionService(repo, processManager, templateRepo)
+	gitService := gitadapter.NewService()
+	sessionService := appservice.NewSessionService(repo, processManager, templateRepo,
+		appservice.WithGitService(gitService, cfg.Git.WorktreesDir),
+	)
 
-	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, cfg.Server.Port)
+	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, gitService, cfg.Server.Port)
 
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	server := &http.Server{

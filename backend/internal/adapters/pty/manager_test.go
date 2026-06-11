@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -321,5 +322,94 @@ func readAllPTY(t *testing.T, handle *ports.PTYHandle) string {
 
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && strings.Contains(s, substr)
+}
+
+func TestResolveGitCommonDir_MainRepo(t *testing.T) {
+	// A plain git repo's .git is a directory, not a gitlink — common dir == .git
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@t.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@t.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "t@t.com")
+	run("config", "user.name", "Test")
+	if err := os.WriteFile(fmt.Sprintf("%s/README.md", dir), []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	run("add", ".")
+	run("commit", "-m", "init")
+
+	// .git is a directory — resolveGitCommonDir should return .git path (not a gitlink)
+	gitPath := fmt.Sprintf("%s/.git", dir)
+	fi, err := os.Stat(gitPath)
+	if err != nil {
+		t.Fatalf("stat .git: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Skip("expected .git to be a directory in main repo")
+	}
+}
+
+func TestResolveGitCommonDir_Worktree(t *testing.T) {
+	// A linked worktree has a .git FILE (gitlink); resolveGitCommonDir should return
+	// the main repo's .git directory.
+	mainDir := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@t.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@t.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	run(mainDir, "init", "-b", "main")
+	run(mainDir, "config", "user.email", "t@t.com")
+	run(mainDir, "config", "user.name", "Test")
+	if err := os.WriteFile(fmt.Sprintf("%s/README.md", mainDir), []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	run(mainDir, "add", ".")
+	run(mainDir, "commit", "-m", "init")
+
+	wtDir := t.TempDir()
+	wtPath := fmt.Sprintf("%s/linked-wt", wtDir)
+	run(mainDir, "worktree", "add", "-b", "wt-branch", wtPath)
+
+	// .git in the worktree should be a file
+	gitPath := fmt.Sprintf("%s/.git", wtPath)
+	fi, err := os.Stat(gitPath)
+	if err != nil {
+		t.Fatalf("stat .git in worktree: %v", err)
+	}
+	if fi.IsDir() {
+		t.Fatal(".git in worktree should be a file (gitlink), not a directory")
+	}
+
+	commonDir, err := resolveGitCommonDir(wtPath)
+	if err != nil {
+		t.Fatalf("resolveGitCommonDir failed: %v", err)
+	}
+	if commonDir == "" {
+		t.Fatal("expected non-empty common dir")
+	}
+	// Common dir should contain the main repo's objects
+	objDir := fmt.Sprintf("%s/objects", commonDir)
+	if _, err := os.Stat(objDir); err != nil {
+		t.Errorf("expected objects dir in common dir %q: %v", commonDir, err)
+	}
 }
 

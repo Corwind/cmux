@@ -1,8 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useCreateSession } from "../hooks/useCreateSession";
 import { useSessionsStore } from "../stores/sessions.store";
 import { FileBrowser } from "@/features/file-browser";
 import { TemplateSelector } from "@/features/templates";
+import { useGitInfo } from "@/features/git";
+import type { WorktreeInput, CreateSessionInput } from "../types";
+import { WorktreeSection } from "./WorktreeSection";
 
 export function CreateSessionDialog() {
   const [isOpen, setIsOpen] = useState(false);
@@ -11,26 +14,44 @@ export function CreateSessionDialog() {
   const [templateId, setTemplateId] = useState("");
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [showFileBrowser, setShowFileBrowser] = useState(false);
+  const [debouncedDir, setDebouncedDir] = useState("");
+  const [worktreeInput, setWorktreeInput] = useState<WorktreeInput | undefined>(undefined);
+  const [effectiveWorkingDir, setEffectiveWorkingDir] = useState("");
+
   const handleTemplateChange = useCallback((id: string) => setTemplateId(id), []);
   const createSession = useCreateSession();
   const setActiveSession = useSessionsStore((s) => s.setActiveSession);
 
+  // Debounce directory changes for git info lookup
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedDir(directory.trim()), 400);
+    return () => clearTimeout(timer);
+  }, [directory]);
+
+  // Reset working dir to directory when not in worktree mode
+  useEffect(() => {
+    if (!worktreeInput) {
+      setEffectiveWorkingDir(directory.trim());
+    }
+  }, [directory, worktreeInput]);
+
+  const { data: gitInfo } = useGitInfo(debouncedDir || undefined);
+
+  function handleWorktreeChange(wt: WorktreeInput | undefined, workingDir: string) {
+    setWorktreeInput(wt);
+    setEffectiveWorkingDir(workingDir);
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!directory.trim()) return;
+    const workingDir = effectiveWorkingDir || directory.trim();
+    if (!workingDir) return;
 
-    const input: { name?: string; working_dir: string; template_id?: string; skip_permissions?: boolean } = {
-      working_dir: directory.trim(),
-    };
-    if (name.trim()) {
-      input.name = name.trim();
-    }
-    if (templateId) {
-      input.template_id = templateId;
-    }
-    if (skipPermissions) {
-      input.skip_permissions = true;
-    }
+    const input: CreateSessionInput = { working_dir: workingDir };
+    if (name.trim()) input.name = name.trim();
+    if (templateId) input.template_id = templateId;
+    if (skipPermissions) input.skip_permissions = true;
+    if (worktreeInput) input.worktree = worktreeInput;
 
     createSession.mutate(input, {
       onSuccess: (session) => {
@@ -39,10 +60,15 @@ export function CreateSessionDialog() {
         setDirectory("");
         setTemplateId("");
         setSkipPermissions(false);
+        setWorktreeInput(undefined);
+        setEffectiveWorkingDir("");
         setIsOpen(false);
       },
     });
   }
+
+  const isWorktreeMode = !!worktreeInput;
+  const canSubmit = !createSession.isPending && (directory.trim() || effectiveWorkingDir);
 
   if (!isOpen) {
     return (
@@ -144,6 +170,23 @@ export function CreateSessionDialog() {
             </button>
           </div>
         </div>
+
+        {gitInfo?.is_repo && gitInfo.repo_root && (
+          <div>
+            <label
+              className="mb-1 block text-xs font-medium"
+              style={{ color: "var(--cmux-text-muted)" }}
+            >
+              Git worktree
+            </label>
+            <WorktreeSection
+              gitInfo={gitInfo}
+              repoRoot={gitInfo.repo_root}
+              onChange={handleWorktreeChange}
+            />
+          </div>
+        )}
+
         <TemplateSelector value={templateId} onChange={handleTemplateChange} />
         <label
           className="flex items-center gap-2 text-xs"
@@ -160,11 +203,15 @@ export function CreateSessionDialog() {
         <div className="flex gap-2">
           <button
             type="submit"
-            disabled={createSession.isPending || !directory.trim()}
+            disabled={!canSubmit}
             className="flex-1 rounded py-1.5 text-sm font-medium text-white transition-colors disabled:opacity-50"
             style={{ backgroundColor: "var(--cmux-accent-button)" }}
           >
-            {createSession.isPending ? "Creating..." : "Create"}
+            {createSession.isPending
+              ? isWorktreeMode
+                ? "Creating worktree..."
+                : "Creating..."
+              : "Create"}
           </button>
           <button
             type="button"

@@ -84,8 +84,8 @@ export class ApiClient {
     return this.request<T>(endpoint, { method: "PATCH", body });
   }
 
-  async delete<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, { method: "DELETE" });
+  async delete<T>(endpoint: string, options?: { params?: Record<string, string> }): Promise<T> {
+    return this.request<T>(endpoint, { method: "DELETE", params: options?.params });
   }
 }
 

@@ -16,16 +16,19 @@ const (
 )
 
 type Session struct {
-	ID              string
-	Name            string
-	WorkingDir      string
-	Status          SessionStatus
-	PID             int
-	ClaudeSessionID string
-	TemplateID      string
-	SkipPermissions bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID               string
+	Name             string
+	WorkingDir       string
+	Status           SessionStatus
+	PID              int
+	ClaudeSessionID  string
+	TemplateID       string
+	SkipPermissions  bool
+	RepoRoot         string
+	GitBranch        string
+	WorktreeManaged  bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 func NewSession(name, workingDir string) (Session, error) {

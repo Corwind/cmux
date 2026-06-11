@@ -294,6 +294,16 @@ func (m *Manager) buildSandboxCommand(workingDir string, originalArgs []string) 
 		TemplateNames: m.sandboxTemplates,
 	}
 
+	// Detect git worktrees: if workingDir/.git is a file (gitlink), the shared
+	// object DB lives in the main repo outside our sandbox. Grant r/w access to
+	// the git common dir so git commands work inside the session.
+	gitPath := filepath.Join(workingDir, ".git")
+	if fi, err := os.Stat(gitPath); err == nil && !fi.IsDir() {
+		if commonDir, err := resolveGitCommonDir(workingDir); err == nil && commonDir != "" {
+			cfg.ExtraWritePaths = append(cfg.ExtraWritePaths, commonDir)
+		}
+	}
+
 	var profile string
 	var err error
 
@@ -323,4 +333,27 @@ func (m *Manager) buildSandboxCommand(workingDir string, originalArgs []string) 
 	sandboxArgs = append(sandboxArgs, originalArgs...)
 
 	return exec.Command("sandbox-exec", sandboxArgs...), nil
+}
+
+// resolveGitCommonDir runs `git rev-parse --git-common-dir` inside a worktree
+// and returns the symlink-resolved absolute path of the shared git dir.
+func resolveGitCommonDir(worktreePath string) (string, error) {
+	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" || raw == ".git" {
+		return "", fmt.Errorf("not a linked worktree")
+	}
+	// The path may be relative to the repo; make it absolute
+	if !filepath.IsAbs(raw) {
+		raw = filepath.Join(worktreePath, raw)
+	}
+	resolved, err := filepath.EvalSymlinks(raw)
+	if err != nil {
+		return raw, nil
+	}
+	return resolved, nil
 }
