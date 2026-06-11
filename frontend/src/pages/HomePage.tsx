@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { SessionList, CreateSessionDialog, useSessionsStore } from "@/features/sessions";
+import { SessionList, CreateSessionDialog, WorktreePanel, useSessionsStore } from "@/features/sessions";
 import { TemplateManager } from "@/features/templates";
 import { Terminal } from "@/features/terminal";
 
 export function HomePage() {
   const activeSessionId = useSessionsStore((s) => s.activeSessionId);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [worktreesOpen, setWorktreesOpen] = useState(true);
 
   return (
     <AppLayout
@@ -15,6 +16,33 @@ export function HomePage() {
           <CreateSessionDialog />
           <div className="mt-3">
             <SessionList />
+          </div>
+          <div
+            className="mt-4 pt-3"
+            style={{ borderTop: "1px solid var(--cmux-border-light)" }}
+          >
+            <button
+              type="button"
+              onClick={() => setWorktreesOpen(!worktreesOpen)}
+              className="flex w-full items-center justify-between px-1 text-xs font-medium uppercase tracking-wider"
+              style={{ color: "var(--cmux-text-muted)" }}
+            >
+              Worktrees
+              <svg
+                className={`h-3.5 w-3.5 transition-transform ${worktreesOpen ? "rotate-180" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {worktreesOpen && (
+              <div className="mt-2">
+                <WorktreePanel />
+              </div>
+            )}
           </div>
           <div
             className="mt-4 pt-3"
