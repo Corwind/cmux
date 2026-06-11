@@ -8,9 +8,10 @@ import (
 
 // ProfileConfig holds the parameters for building a sandbox profile.
 type ProfileConfig struct {
-	WorkingDir    string
-	TemplateNames []string
-	HomeDir       string
+	WorkingDir      string
+	TemplateNames   []string
+	HomeDir         string
+	ExtraWritePaths []string
 }
 
 // ProfileBuilder assembles SBPL sandbox profiles from a base set of rules
@@ -40,7 +41,7 @@ func (pb *ProfileBuilder) Build(cfg ProfileConfig) (string, error) {
 		}
 		templateFragments = append(templateFragments, ";; template: "+name+"\n"+tmpl.Content)
 	}
-	return buildProfile(templateFragments), nil
+	return buildProfile(templateFragments, cfg.ExtraWritePaths), nil
 }
 
 // Params returns the parameter map for sandbox-exec -D flags.
@@ -58,7 +59,7 @@ func (pb *ProfileBuilder) Params(cfg ProfileConfig) map[string]string {
 
 // buildProfile assembles the complete SBPL profile with deny-by-default,
 // minimal system access, working directory read/write, and template fragments.
-func buildProfile(templateFragments []string) string {
+func buildProfile(templateFragments []string, extraWritePaths []string) string {
 	var b strings.Builder
 
 	b.WriteString("(version 1)\n")
@@ -151,6 +152,16 @@ func buildProfile(templateFragments []string) string {
 	b.WriteString(`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))` + "\n")
 	b.WriteString(`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.config")))` + "\n")
 
+	// Extra write paths (e.g. shared git common dir for worktrees)
+	if len(extraWritePaths) > 0 {
+		b.WriteString("\n;; extra write paths (e.g. git common dir for worktrees)\n")
+		for _, p := range extraWritePaths {
+			escaped := strings.ReplaceAll(p, `"`, `\"`)
+			b.WriteString(`(allow file-read* (subpath "` + escaped + `"))` + "\n")
+			b.WriteString(`(allow file-write* (subpath "` + escaped + `"))` + "\n")
+		}
+	}
+
 	// Template fragments (additional access rules)
 	for _, fragment := range templateFragments {
 		b.WriteString("\n" + fragment + "\n")
@@ -169,7 +180,7 @@ func (pb *ProfileBuilder) BuildWithContent(cfg ProfileConfig, templateContents [
 		}
 		templateFragments = append(templateFragments, ";; inline template\n"+strings.TrimSpace(content))
 	}
-	return buildProfile(templateFragments), nil
+	return buildProfile(templateFragments, cfg.ExtraWritePaths), nil
 }
 
 // validateTemplateName ensures the template name is safe to embed in a profile comment.

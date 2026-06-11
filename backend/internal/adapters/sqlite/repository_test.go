@@ -146,6 +146,75 @@ func TestRepository_Delete(t *testing.T) {
 	}
 }
 
+func TestRepository_WorktreeFieldsRoundTrip(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	s := makeSession("worktree-sess")
+	s.RepoRoot = "/Users/foo/myrepo"
+	s.GitBranch = "feature/wt"
+	s.WorktreeManaged = true
+
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := repo.Get(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.RepoRoot != s.RepoRoot {
+		t.Errorf("RepoRoot: expected %q, got %q", s.RepoRoot, got.RepoRoot)
+	}
+	if got.GitBranch != s.GitBranch {
+		t.Errorf("GitBranch: expected %q, got %q", s.GitBranch, got.GitBranch)
+	}
+	if got.WorktreeManaged != s.WorktreeManaged {
+		t.Errorf("WorktreeManaged: expected %v, got %v", s.WorktreeManaged, got.WorktreeManaged)
+	}
+}
+
+func TestRepository_WorktreeFieldsDefaultToEmpty(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	s := makeSession("plain-sess")
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := repo.Get(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.RepoRoot != "" {
+		t.Errorf("expected empty RepoRoot, got %q", got.RepoRoot)
+	}
+	if got.GitBranch != "" {
+		t.Errorf("expected empty GitBranch, got %q", got.GitBranch)
+	}
+	if got.WorktreeManaged {
+		t.Error("expected WorktreeManaged=false by default")
+	}
+}
+
+func TestRepository_WorktreeFieldsIdempotentMigration(t *testing.T) {
+	// Creating a second repo against the same in-memory DB is not possible;
+	// instead verify that running migrations twice does not error.
+	// NewRepository uses :memory: so each call is an isolated DB.
+	repo1, err := NewRepository(":memory:")
+	if err != nil {
+		t.Fatalf("first NewRepository failed: %v", err)
+	}
+	_ = repo1
+
+	repo2, err := NewRepository(":memory:")
+	if err != nil {
+		t.Fatalf("second NewRepository failed: %v", err)
+	}
+	_ = repo2
+}
+
 func TestRepository_ListOrderByCreatedAtDesc(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()

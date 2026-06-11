@@ -262,3 +262,51 @@ func TestBuildWithContentEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildWithExtraWritePaths(t *testing.T) {
+	pb := NewProfileBuilder(testdataDir(t))
+
+	cfg := ProfileConfig{
+		WorkingDir:      "/tmp/project",
+		HomeDir:         "/Users/testuser",
+		ExtraWritePaths: []string{"/Users/testuser/repo/.git", "/some/shared/dir"},
+	}
+
+	profile, err := pb.Build(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(profile, `(allow file-read* (subpath "/Users/testuser/repo/.git"))`) {
+		t.Error("profile missing extra write path read rule")
+	}
+	if !strings.Contains(profile, `(allow file-write* (subpath "/Users/testuser/repo/.git"))`) {
+		t.Error("profile missing extra write path write rule")
+	}
+	if !strings.Contains(profile, `(allow file-read* (subpath "/some/shared/dir"))`) {
+		t.Error("profile missing second extra write path read rule")
+	}
+	if !strings.Contains(profile, `(allow file-write* (subpath "/some/shared/dir"))`) {
+		t.Error("profile missing second extra write path write rule")
+	}
+}
+
+func TestBuildWithExtraWritePaths_QuotesSpecialChars(t *testing.T) {
+	pb := NewProfileBuilder(testdataDir(t))
+
+	// Path with a double-quote should be escaped
+	cfg := ProfileConfig{
+		WorkingDir:      "/tmp/project",
+		HomeDir:         "/Users/testuser",
+		ExtraWritePaths: []string{`/Users/foo"bar`},
+	}
+
+	profile, err := pb.Build(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(profile, `"/Users/foo\"bar"`) {
+		t.Errorf("profile should escape double-quotes in paths; got profile:\n%s", profile)
+	}
+}
+

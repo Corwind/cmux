@@ -27,7 +27,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *app.SessionService) {
 	pm := pty.NewManager(pty.WithCommand("sleep"), pty.WithFixedArgs("60"))
 	service := app.NewSessionService(repo, pm, nil)
 
-	router := NewTestRouter(service, nil, nil)
+	router := NewTestRouter(service, nil, nil, nil)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 
@@ -38,11 +38,11 @@ func TestWebSocketSendReceive(t *testing.T) {
 	server, service := setupTestServer(t)
 
 	ctx := context.Background()
-	session, err := service.CreateSession(ctx, "test-session", os.TempDir(), "", false)
+	session, err := service.CreateSession(ctx, app.CreateSessionInput{Name: "test-session", WorkingDir: os.TempDir()})
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
-	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID) })
+	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID, app.WorktreeActionKeep) })
 
 	time.Sleep(50 * time.Millisecond) // allow PTY to be ready
 
@@ -77,11 +77,11 @@ func TestWebSocketResize(t *testing.T) {
 	server, service := setupTestServer(t)
 
 	ctx := context.Background()
-	session, err := service.CreateSession(ctx, "test-resize", os.TempDir(), "", false)
+	session, err := service.CreateSession(ctx, app.CreateSessionInput{Name: "test-resize", WorkingDir: os.TempDir()})
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
-	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID) })
+	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID, app.WorktreeActionKeep) })
 
 	time.Sleep(50 * time.Millisecond) // allow PTY to be ready
 
@@ -118,7 +118,7 @@ func TestWebSocketProcessExit(t *testing.T) {
 	server, service := setupTestServer(t)
 
 	ctx := context.Background()
-	session, err := service.CreateSession(ctx, "test-exit", os.TempDir(), "", false)
+	session, err := service.CreateSession(ctx, app.CreateSessionInput{Name: "test-exit", WorkingDir: os.TempDir()})
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestWebSocketProcessExit(t *testing.T) {
 		t.Fatalf("resize before kill failed: %v", err)
 	}
 
-	_ = service.DeleteSession(ctx, session.ID)
+	_ = service.DeleteSession(ctx, session.ID, app.WorktreeActionKeep)
 
 	// Read from WS — we should get a status stopped message or connection close
 	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)

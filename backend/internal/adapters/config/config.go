@@ -11,10 +11,15 @@ import (
 )
 
 type tomlConfig struct {
-	Server  tomlServer  `toml:"server"`
-	Sandbox tomlSandbox `toml:"sandbox"`
-	Shell   tomlShell   `toml:"shell"`
+	Server  tomlServer        `toml:"server"`
+	Sandbox tomlSandbox       `toml:"sandbox"`
+	Shell   tomlShell         `toml:"shell"`
+	Git     tomlGit           `toml:"git"`
 	Env     map[string]string `toml:"env"`
+}
+
+type tomlGit struct {
+	WorktreesDir string `toml:"worktrees_dir"`
 }
 
 type tomlServer struct {
@@ -70,6 +75,9 @@ func defaults() domain.Config {
 		Sandbox: domain.SandboxConfig{
 			TemplateDir: "sandbox-profiles",
 		},
+		Git: domain.GitConfig{
+			WorktreesDir: "~/.cmux/worktrees",
+		},
 	}
 }
 
@@ -124,6 +132,9 @@ func loadFile(path string, cfg *domain.Config) error {
 	if len(tc.Env) > 0 {
 		cfg.Env = tc.Env
 	}
+	if tc.Git.WorktreesDir != "" {
+		cfg.Git.WorktreesDir = tc.Git.WorktreesDir
+	}
 
 	return nil
 }
@@ -151,4 +162,6 @@ func expandPaths(cfg *domain.Config) {
 	for i, f := range cfg.Shell.InitFiles {
 		cfg.Shell.InitFiles[i] = expandTilde(f)
 	}
+
+	cfg.Git.WorktreesDir = expandTilde(cfg.Git.WorktreesDir)
 }

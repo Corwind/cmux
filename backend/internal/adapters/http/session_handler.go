@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -19,6 +20,9 @@ func toSessionResponse(s domain.Session) sessionResponse {
 		PID:             s.PID,
 		TemplateID:      s.TemplateID,
 		SkipPermissions: s.SkipPermissions,
+		RepoRoot:        s.RepoRoot,
+		GitBranch:       s.GitBranch,
+		WorktreeManaged: s.WorktreeManaged,
 		CreatedAt:       s.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:       s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
@@ -32,11 +36,20 @@ func NewSessionHandler(service *app.SessionService) *SessionHandler {
 	return &SessionHandler{service: service}
 }
 
+type worktreeRequest struct {
+	RepoPath     string `json:"repo_path"`
+	Branch       string `json:"branch"`
+	BaseRef      string `json:"base_ref,omitempty"`
+	CreateBranch bool   `json:"create_branch"`
+	Path         string `json:"path,omitempty"`
+}
+
 type createSessionRequest struct {
-	Name            string `json:"name"`
-	WorkingDir      string `json:"working_dir"`
-	TemplateID      string `json:"template_id"`
-	SkipPermissions bool   `json:"skip_permissions"`
+	Name            string           `json:"name"`
+	WorkingDir      string           `json:"working_dir"`
+	TemplateID      string           `json:"template_id"`
+	SkipPermissions bool             `json:"skip_permissions"`
+	Worktree        *worktreeRequest `json:"worktree,omitempty"`
 }
 
 type sessionResponse struct {
@@ -47,6 +60,9 @@ type sessionResponse struct {
 	PID             int    `json:"pid"`
 	TemplateID      string `json:"template_id"`
 	SkipPermissions bool   `json:"skip_permissions"`
+	RepoRoot        string `json:"repo_root,omitempty"`
+	GitBranch       string `json:"git_branch,omitempty"`
+	WorktreeManaged bool   `json:"worktree_managed,omitempty"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 }
@@ -58,7 +74,23 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.service.CreateSession(r.Context(), req.Name, req.WorkingDir, req.TemplateID, req.SkipPermissions)
+	input := app.CreateSessionInput{
+		Name:            req.Name,
+		WorkingDir:      req.WorkingDir,
+		TemplateID:      req.TemplateID,
+		SkipPermissions: req.SkipPermissions,
+	}
+	if req.Worktree != nil {
+		input.Worktree = &app.WorktreeSpec{
+			RepoPath:     req.Worktree.RepoPath,
+			Branch:       req.Worktree.Branch,
+			BaseRef:      req.Worktree.BaseRef,
+			CreateBranch: req.Worktree.CreateBranch,
+			Path:         req.Worktree.Path,
+		}
+	}
+
+	session, err := h.service.CreateSession(r.Context(), input)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -133,7 +165,18 @@ func (h *SessionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 
 func (h *SessionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.service.DeleteSession(r.Context(), id); err != nil {
+
+	action := app.WorktreeAction(r.URL.Query().Get("worktree"))
+	if action == "" {
+		action = app.WorktreeActionKeep
+	}
+
+	if err := h.service.DeleteSession(r.Context(), id, action); err != nil {
+		var dirtyErr *app.ErrWorktreeDirty
+		if errors.As(err, &dirtyErr) {
+			http.Error(w, dirtyErr.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/cors"
 )
 
-func NewRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, port string) http.Handler {
+func NewRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, gitService ports.GitService, port string) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -30,6 +30,7 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 	fsHandler := NewFilesystemHandler(fileBrowser)
 	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}))
 	openHandler := NewOpenHandler()
+	gitHandler := NewGitHandler(gitService)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/sessions", sessionHandler.List)
@@ -51,6 +52,7 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 
 		r.Get("/fs", fsHandler.ListDirectory)
 		r.Post("/open", openHandler.Handle)
+		r.Get("/git/info", gitHandler.Info)
 	})
 
 	r.Get("/ws/sessions/{id}", wsHandler.Handle)
@@ -88,7 +90,7 @@ func mountSPA(r chi.Router) {
 }
 
 // NewTestRouter creates a router with permissive WebSocket origin patterns for testing.
-func NewTestRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser) http.Handler {
+func NewTestRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, gitService ports.GitService) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -104,6 +106,7 @@ func NewTestRouter(sessionService *app.SessionService, templateService *app.Temp
 	templateHandler := NewTemplateHandler(templateService)
 	fsHandler := NewFilesystemHandler(fileBrowser)
 	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}))
+	gitHandler := NewGitHandler(gitService)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/sessions", sessionHandler.List)
@@ -124,6 +127,7 @@ func NewTestRouter(sessionService *app.SessionService, templateService *app.Temp
 		r.Get("/templates/{id}/export", templateHandler.Export)
 
 		r.Get("/fs", fsHandler.ListDirectory)
+		r.Get("/git/info", gitHandler.Info)
 	})
 
 	r.Get("/ws/sessions/{id}", wsHandler.Handle)

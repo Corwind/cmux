@@ -1,16 +1,37 @@
 import { useSessions } from "../hooks/useSessions";
-import { useDeleteSession } from "../hooks/useDeleteSession";
+import { useDeleteSession, deleteSessionWithWorktreePrompt } from "../hooks/useDeleteSession";
 import { useResumeSession } from "../hooks/useResumeSession";
 import { useRestartSession } from "../hooks/useRestartSession";
 import { useSessionsStore } from "../stores/sessions.store";
 import { StatusBadge } from "./StatusBadge";
+import type { Session } from "../types";
+
+function BranchBadge({ branch }: { branch: string }) {
+  return (
+    <span
+      className="max-w-[80px] truncate rounded px-1 py-0.5 text-xs"
+      style={{
+        backgroundColor: "var(--cmux-sidebar)",
+        border: "1px solid var(--cmux-border-light)",
+        color: "var(--cmux-text-muted)",
+      }}
+      title={branch}
+    >
+      {branch}
+    </span>
+  );
+}
 
 export function SessionList() {
   const { data: sessions, isLoading } = useSessions();
-  const deleteSession = useDeleteSession();
+  const deleteSessionMutation = useDeleteSession();
   const resumeSession = useResumeSession();
   const restartSession = useRestartSession();
   const { activeSessionId, setActiveSession } = useSessionsStore();
+
+  async function handleDelete(session: Session) {
+    await deleteSessionWithWorktreePrompt(session, deleteSessionMutation);
+  }
 
   if (isLoading) {
     return (
@@ -61,7 +82,10 @@ export function SessionList() {
             }}
           >
             <div className="min-w-0 flex-1">
-              <div className="truncate font-medium">{session.name}</div>
+              <div className="flex items-center gap-1.5 truncate font-medium">
+                {session.name}
+                {session.git_branch && <BranchBadge branch={session.git_branch} />}
+              </div>
               <div
                 className="truncate text-xs"
                 style={{ color: "var(--cmux-text-muted)" }}
@@ -149,7 +173,7 @@ export function SessionList() {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  deleteSession.mutate(session.id);
+                  void handleDelete(session);
                 }}
                 className="rounded p-0.5 transition-colors"
                 style={{ color: "var(--cmux-text-muted)" }}

@@ -58,13 +58,13 @@ func (m *mockRepo) Delete(ctx context.Context, id string) error {
 // --- Mock ProcessManager ---
 
 type mockProcessManager struct {
-	alive      map[int]bool
-	handles    map[int]*ports.PTYHandle
-	doneChans  map[int]chan error
-	spawnErr   error
-	killPIDs   []int
-	spawnArgs  []string
-	nextPID    int
+	alive     map[int]bool
+	handles   map[int]*ports.PTYHandle
+	doneChans map[int]chan error
+	spawnErr  error
+	killPIDs  []int
+	spawnArgs []string
+	nextPID   int
 }
 
 func newMockProcessManager() *mockProcessManager {
@@ -133,6 +133,61 @@ func (m *mockSandboxProcessManager) SetSandboxContent(contents []string) {
 	m.sandboxContents = contents
 }
 
+// --- Mock GitService ---
+
+type mockGitService struct {
+	infoFn          func(path string) (ports.GitInfo, error)
+	addWorktreeFn   func(repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error)
+	removeWorktreeFn func(repoRoot, wtPath string, force bool) error
+	isCleanFn       func(path string) (bool, error)
+	removedWorktrees []string
+	forceFlags       []bool
+}
+
+func newMockGitService() *mockGitService {
+	return &mockGitService{}
+}
+
+func (m *mockGitService) Info(path string) (ports.GitInfo, error) {
+	if m.infoFn != nil {
+		return m.infoFn(path)
+	}
+	return ports.GitInfo{
+		IsRepo:        true,
+		RepoRoot:      path,
+		CurrentBranch: "main",
+	}, nil
+}
+
+func (m *mockGitService) AddWorktree(repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+	if m.addWorktreeFn != nil {
+		return m.addWorktreeFn(repoRoot, wtPath, branch, baseRef, create)
+	}
+	return ports.Worktree{Path: wtPath, Branch: branch}, nil
+}
+
+func (m *mockGitService) RemoveWorktree(repoRoot, wtPath string, force bool) error {
+	m.removedWorktrees = append(m.removedWorktrees, wtPath)
+	m.forceFlags = append(m.forceFlags, force)
+	if m.removeWorktreeFn != nil {
+		return m.removeWorktreeFn(repoRoot, wtPath, force)
+	}
+	return nil
+}
+
+func (m *mockGitService) IsClean(path string) (bool, error) {
+	if m.isCleanFn != nil {
+		return m.isCleanFn(path)
+	}
+	return true, nil
+}
+
+// --- Helper ---
+
+func createInput(name, workingDir string) CreateSessionInput {
+	return CreateSessionInput{Name: name, WorkingDir: workingDir}
+}
+
 // --- Tests ---
 
 func TestCreateSession_Success(t *testing.T) {
@@ -140,7 +195,7 @@ func TestCreateSession_Success(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	s, err := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	s, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -164,7 +219,7 @@ func TestCreateSession_EmptyNameDefaultsToDir(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	session, err := svc.CreateSession(context.Background(), "", "/home/user/my-project", "", false)
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{WorkingDir: "/home/user/my-project"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -178,7 +233,7 @@ func TestCreateSession_EmptyWorkingDir(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	_, err := svc.CreateSession(context.Background(), "test", "", "", false)
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test"})
 	if err == nil {
 		t.Fatal("expected error for empty working dir")
 	}
@@ -190,7 +245,7 @@ func TestCreateSession_SpawnFailure(t *testing.T) {
 	pm.spawnErr = fmt.Errorf("spawn failed")
 	svc := NewSessionService(repo, pm, nil)
 
-	_, err := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
 	if err == nil {
 		t.Fatal("expected error when spawn fails")
 	}
@@ -204,7 +259,7 @@ func TestCreateSession_RepoFailureKillsProcess(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	_, err := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
 	if err == nil {
 		t.Fatal("expected error when repo fails")
 	}
@@ -218,7 +273,7 @@ func TestCreateSession_SkipPermissions(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	_, err := svc.CreateSession(context.Background(), "test", "/tmp", "", true)
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp", SkipPermissions: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -240,7 +295,7 @@ func TestCreateSession_NoSkipPermissions(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	_, err := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -257,7 +312,7 @@ func TestGetSession(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	created, _ := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	created, _ := svc.CreateSession(context.Background(), createInput("test", "/tmp"))
 	got, err := svc.GetSession(context.Background(), created.ID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -283,7 +338,7 @@ func TestListSessions_UpdatesDeadProcesses(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	s, _ := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	s, _ := svc.CreateSession(context.Background(), createInput("test", "/tmp"))
 	// Simulate process death
 	delete(pm.alive, s.PID)
 
@@ -304,8 +359,8 @@ func TestDeleteSession_KillsRunningProcess(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	s, _ := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
-	if err := svc.DeleteSession(context.Background(), s.ID); err != nil {
+	s, _ := svc.CreateSession(context.Background(), createInput("test", "/tmp"))
+	if err := svc.DeleteSession(context.Background(), s.ID, WorktreeActionKeep); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Verify killed
@@ -330,7 +385,7 @@ func TestDeleteSession_NotFound(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	err := svc.DeleteSession(context.Background(), "nonexistent")
+	err := svc.DeleteSession(context.Background(), "nonexistent", WorktreeActionKeep)
 	if err == nil {
 		t.Fatal("expected error for nonexistent session")
 	}
@@ -341,7 +396,7 @@ func TestGetPTYHandle_Success(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	s, _ := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	s, _ := svc.CreateSession(context.Background(), createInput("test", "/tmp"))
 	h, err := svc.GetPTYHandle(s.ID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -356,7 +411,7 @@ func TestGetPTYHandle_NotRunning(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	s, _ := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	s, _ := svc.CreateSession(context.Background(), createInput("test", "/tmp"))
 	// Mark as stopped in repo
 	s.Status = domain.StatusStopped
 	if err := repo.Update(context.Background(), s); err != nil {
@@ -388,7 +443,7 @@ func TestCreateSession_StoresTemplateID(t *testing.T) {
 	tmplRepo.templates["tmpl-1"] = tmpl
 
 	svc := NewSessionService(repo, pm, tmplRepo)
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "tmpl-1", false)
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp", TemplateID: "tmpl-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -415,7 +470,7 @@ func TestResumeSession_AppliesSandboxTemplate(t *testing.T) {
 	svc := NewSessionService(repo, pm, tmplRepo)
 
 	// Create session with template
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "tmpl-1", false)
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp", TemplateID: "tmpl-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -451,7 +506,7 @@ func TestResumeSession_AlreadyRunning(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	session, err := svc.CreateSession(context.Background(), createInput("test", "/tmp"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -471,7 +526,7 @@ func TestCreateSession_StoresSkipPermissions(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "", true)
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp", SkipPermissions: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -494,7 +549,7 @@ func TestResumeSession_ReappliesSkipPermissions(t *testing.T) {
 	svc := NewSessionService(repo, pm, nil)
 
 	// Create session with skip permissions
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "", true)
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp", SkipPermissions: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -529,7 +584,7 @@ func TestResumeSession_NoSkipPermissionsWhenNotSet(t *testing.T) {
 	svc := NewSessionService(repo, pm, nil)
 
 	// Create session without skip permissions
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	session, err := svc.CreateSession(context.Background(), createInput("test", "/tmp"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -573,7 +628,7 @@ func TestRestartSession_RunningSession(t *testing.T) {
 
 	svc := NewSessionService(repo, pm, tmplRepo)
 
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "tmpl-1", false)
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp", TemplateID: "tmpl-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -617,7 +672,7 @@ func TestRestartSession_StoppedSession(t *testing.T) {
 
 	svc := NewSessionService(repo, pm, tmplRepo)
 
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "tmpl-1", false)
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp", TemplateID: "tmpl-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -649,7 +704,7 @@ func TestRestartSession_PicksUpUpdatedTemplate(t *testing.T) {
 
 	svc := NewSessionService(repo, pm, tmplRepo)
 
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "tmpl-1", false)
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp", TemplateID: "tmpl-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -690,7 +745,7 @@ func TestWatchProcess_IgnoresStaleWatcher(t *testing.T) {
 	svc := NewSessionService(repo, pm, nil)
 
 	// Create a session — spawns with PID 42, watcher on handle.Done
-	session, err := svc.CreateSession(context.Background(), "test", "/tmp", "", false)
+	session, err := svc.CreateSession(context.Background(), createInput("test", "/tmp"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -710,8 +765,6 @@ func TestWatchProcess_IgnoresStaleWatcher(t *testing.T) {
 	oldDone <- nil
 
 	// Give the watcher goroutine time to run
-	// Use a channel-based sync: read the session back in a short loop
-	// to allow the goroutine to complete
 	for i := 0; i < 100; i++ {
 		s, _ := svc.GetSession(context.Background(), session.ID)
 		if s.Status != domain.StatusRunning {
@@ -727,4 +780,235 @@ func TestWatchProcess_IgnoresStaleWatcher(t *testing.T) {
 	if final.PID != restarted.PID {
 		t.Errorf("expected PID %d, got %d", restarted.PID, final.PID)
 	}
+}
+
+// --- Worktree tests ---
+
+func TestCreateSession_WithWorktree_SetsFields(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "wt-session",
+		WorkingDir: "/repo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/repo",
+			Branch:       "feature/wt",
+			BaseRef:      "main",
+			CreateBranch: true,
+			Path:         "/tmp/worktrees/repo/feature-wt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if session.WorkingDir != "/tmp/worktrees/repo/feature-wt" {
+		t.Errorf("expected WorkingDir to be worktree path, got %q", session.WorkingDir)
+	}
+	if session.RepoRoot != "/repo" {
+		t.Errorf("expected RepoRoot=/repo, got %q", session.RepoRoot)
+	}
+	if session.GitBranch != "feature/wt" {
+		t.Errorf("expected GitBranch=feature/wt, got %q", session.GitBranch)
+	}
+	if !session.WorktreeManaged {
+		t.Error("expected WorktreeManaged=true")
+	}
+}
+
+func TestCreateSession_WithWorktree_ComputesDefaultPath(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	git.infoFn = func(path string) (ports.GitInfo, error) {
+		return ports.GitInfo{IsRepo: true, RepoRoot: "/Users/user/myrepo", CurrentBranch: "main"}, nil
+	}
+	var capturedPath string
+	git.addWorktreeFn = func(repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+		capturedPath = wtPath
+		return ports.Worktree{Path: wtPath, Branch: branch}, nil
+	}
+
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/wt"))
+
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		WorkingDir: "/Users/user/myrepo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/Users/user/myrepo",
+			Branch:       "feat/foo",
+			CreateBranch: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Path should be worktreesDir/repoBase/sanitizedBranch
+	expected := "/wt/myrepo/feat-foo"
+	if capturedPath != expected {
+		t.Errorf("expected computed path %q, got %q", expected, capturedPath)
+	}
+}
+
+func TestCreateSession_WithWorktree_NotRepo(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	git.infoFn = func(path string) (ports.GitInfo, error) {
+		return ports.GitInfo{IsRepo: false}, nil
+	}
+
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
+
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		WorkingDir: "/notrepo",
+		Worktree: &WorktreeSpec{
+			RepoPath: "/notrepo",
+			Branch:   "branch",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error when path is not a git repo")
+	}
+}
+
+func TestCreateSession_WithWorktree_SpawnFailureCleansUp(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	pm.spawnErr = fmt.Errorf("spawn failed")
+	git := newMockGitService()
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
+
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		WorkingDir: "/repo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/repo",
+			Branch:       "branch",
+			Path:         "/tmp/worktrees/repo/branch",
+			CreateBranch: true,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error when spawn fails")
+	}
+	// Worktree should have been cleaned up (force removed)
+	if len(git.removedWorktrees) == 0 {
+		t.Error("expected orphaned worktree to be cleaned up on spawn failure")
+	}
+}
+
+func TestDeleteSession_WorktreeKeep(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
+
+	// Insert a managed worktree session directly
+	sess := domain.Session{
+		ID:              "sess-wt",
+		Name:            "wt",
+		WorkingDir:      "/tmp/wt",
+		Status:          domain.StatusStopped,
+		RepoRoot:        "/repo",
+		WorktreeManaged: true,
+	}
+	_ = repo.Create(context.Background(), sess)
+
+	if err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionKeep); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(git.removedWorktrees) != 0 {
+		t.Error("expected worktree to NOT be removed with keep action")
+	}
+}
+
+func TestDeleteSession_WorktreeRemove_Clean(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	git.isCleanFn = func(path string) (bool, error) { return true, nil }
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
+
+	sess := domain.Session{
+		ID:              "sess-wt",
+		Name:            "wt",
+		WorkingDir:      "/tmp/wt",
+		Status:          domain.StatusStopped,
+		RepoRoot:        "/repo",
+		WorktreeManaged: true,
+	}
+	_ = repo.Create(context.Background(), sess)
+
+	if err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionRemove); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(git.removedWorktrees) != 1 || git.removedWorktrees[0] != "/tmp/wt" {
+		t.Error("expected worktree to be removed")
+	}
+	if git.forceFlags[0] {
+		t.Error("expected non-force remove for clean worktree")
+	}
+}
+
+func TestDeleteSession_WorktreeRemove_Dirty_ReturnsError(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	git.isCleanFn = func(path string) (bool, error) { return false, nil }
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
+
+	sess := domain.Session{
+		ID:              "sess-wt",
+		Name:            "wt",
+		WorkingDir:      "/tmp/wt",
+		Status:          domain.StatusStopped,
+		RepoRoot:        "/repo",
+		WorktreeManaged: true,
+	}
+	_ = repo.Create(context.Background(), sess)
+
+	err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionRemove)
+	if err == nil {
+		t.Fatal("expected error when removing dirty worktree without force")
+	}
+	var dirtyErr *ErrWorktreeDirty
+	if !isErrWorktreeDirty(err, &dirtyErr) {
+		t.Errorf("expected ErrWorktreeDirty, got %T: %v", err, err)
+	}
+}
+
+func TestDeleteSession_WorktreeForce(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
+
+	sess := domain.Session{
+		ID:              "sess-wt",
+		Name:            "wt",
+		WorkingDir:      "/tmp/wt",
+		Status:          domain.StatusStopped,
+		RepoRoot:        "/repo",
+		WorktreeManaged: true,
+	}
+	_ = repo.Create(context.Background(), sess)
+
+	if err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionForce); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(git.removedWorktrees) != 1 {
+		t.Error("expected worktree to be force removed")
+	}
+	if !git.forceFlags[0] {
+		t.Error("expected force=true for force action")
+	}
+}
+
+func isErrWorktreeDirty(err error, target **ErrWorktreeDirty) bool {
+	d, ok := err.(*ErrWorktreeDirty)
+	if ok {
+		*target = d
+	}
+	return ok
 }
