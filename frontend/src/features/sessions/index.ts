@@ -8,4 +8,4 @@ export { useDeleteSession } from "./hooks/useDeleteSession";
 export { useRestartSession } from "./hooks/useRestartSession";
 export { useWorktrees, useDeleteWorktree, worktreeKeys } from "./hooks/useWorktrees";
 export { useSessionsStore } from "./stores/sessions.store";
-export type { Session, CreateSessionInput, DirEntry, WorktreeEntry, WorktreeSessionSummary } from "./types";
+export type { Session, CreateSessionInput, DirEntry, WorktreeEntry } from "./types";

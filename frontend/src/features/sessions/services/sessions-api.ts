@@ -21,11 +21,6 @@ export function restartSession(id: string): Promise<Session> {
   return apiClient.post<Session>(`/sessions/${id}/restart`);
 }
 
-export type WorktreeDeleteAction = "keep" | "remove" | "force";
-
-export function deleteSession(id: string, worktreeAction?: WorktreeDeleteAction): Promise<void> {
-  const params = worktreeAction && worktreeAction !== "keep"
-    ? { worktree: worktreeAction }
-    : undefined;
-  return apiClient.delete<void>(`/sessions/${id}`, { params });
+export function deleteSession(id: string): Promise<void> {
+  return apiClient.delete<void>(`/sessions/${id}`);
 }

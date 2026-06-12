@@ -1,5 +1,5 @@
 import { useSessions } from "../hooks/useSessions";
-import { useDeleteSession, deleteSessionWithWorktreePrompt } from "../hooks/useDeleteSession";
+import { useDeleteSession } from "../hooks/useDeleteSession";
 import { useResumeSession } from "../hooks/useResumeSession";
 import { useRestartSession } from "../hooks/useRestartSession";
 import { useSessionsStore } from "../stores/sessions.store";
@@ -29,8 +29,8 @@ export function SessionList() {
   const restartSession = useRestartSession();
   const { activeSessionId, setActiveSession } = useSessionsStore();
 
-  async function handleDelete(session: Session) {
-    await deleteSessionWithWorktreePrompt(session, deleteSessionMutation);
+  function handleDelete(session: Session) {
+    deleteSessionMutation.mutate(session.id);
   }
 
   if (isLoading) {
@@ -173,7 +173,7 @@ export function SessionList() {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  void handleDelete(session);
+                  handleDelete(session);
                 }}
                 className="rounded p-0.5 transition-colors"
                 style={{ color: "var(--cmux-text-muted)" }}
