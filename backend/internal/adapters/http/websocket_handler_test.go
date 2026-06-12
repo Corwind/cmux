@@ -42,7 +42,7 @@ func TestWebSocketSendReceive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
-	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID, app.WorktreeActionKeep) })
+	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID) })
 
 	time.Sleep(50 * time.Millisecond) // allow PTY to be ready
 
@@ -81,7 +81,7 @@ func TestWebSocketResize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
-	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID, app.WorktreeActionKeep) })
+	t.Cleanup(func() { _ = service.DeleteSession(ctx, session.ID) })
 
 	time.Sleep(50 * time.Millisecond) // allow PTY to be ready
 
@@ -138,7 +138,7 @@ func TestWebSocketProcessExit(t *testing.T) {
 		t.Fatalf("resize before kill failed: %v", err)
 	}
 
-	_ = service.DeleteSession(ctx, session.ID, app.WorktreeActionKeep)
+	_ = service.DeleteSession(ctx, session.ID)
 
 	// Read from WS — we should get a status stopped message or connection close
 	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)

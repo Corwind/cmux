@@ -31,6 +31,7 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}))
 	openHandler := NewOpenHandler()
 	gitHandler := NewGitHandler(gitService)
+	worktreeHandler := NewWorktreeHandler(sessionService)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/sessions", sessionHandler.List)
@@ -53,6 +54,9 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 		r.Get("/fs", fsHandler.ListDirectory)
 		r.Post("/open", openHandler.Handle)
 		r.Get("/git/info", gitHandler.Info)
+
+		r.Get("/worktrees", worktreeHandler.List)
+		r.Delete("/worktrees/{id}", worktreeHandler.Delete)
 	})
 
 	r.Get("/ws/sessions/{id}", wsHandler.Handle)
@@ -107,6 +111,7 @@ func NewTestRouter(sessionService *app.SessionService, templateService *app.Temp
 	fsHandler := NewFilesystemHandler(fileBrowser)
 	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}))
 	gitHandler := NewGitHandler(gitService)
+	worktreeHandler := NewWorktreeHandler(sessionService)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/sessions", sessionHandler.List)
@@ -128,6 +133,9 @@ func NewTestRouter(sessionService *app.SessionService, templateService *app.Temp
 
 		r.Get("/fs", fsHandler.ListDirectory)
 		r.Get("/git/info", gitHandler.Info)
+
+		r.Get("/worktrees", worktreeHandler.List)
+		r.Delete("/worktrees/{id}", worktreeHandler.Delete)
 	})
 
 	r.Get("/ws/sessions/{id}", wsHandler.Handle)

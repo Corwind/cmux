@@ -289,12 +289,11 @@ func TestSessionHandler_Create_ResponseIncludesWorktreeFields(t *testing.T) {
 	_ = resp.WorktreeManaged
 }
 
-func TestSessionHandler_Delete_WorktreeParam_Defaults(t *testing.T) {
+func TestSessionHandler_Delete_NoParams(t *testing.T) {
 	handler, svc := setupHandler()
 
 	created, _ := svc.CreateSession(context.Background(), app.CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
 
-	// No ?worktree= param — should default to keep
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+created.ID, nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", created.ID)

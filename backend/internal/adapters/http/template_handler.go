@@ -19,8 +19,8 @@ func NewTemplateHandler(service *app.TemplateService) *TemplateHandler {
 }
 
 type templateRequest struct {
-	Name    string              `json:"name"`
-	Content string              `json:"content"`
+	Name    string               `json:"name"`
+	Content string               `json:"content"`
 	Rules   []domain.SandboxRule `json:"rules"`
 }
 
@@ -36,7 +36,7 @@ type templateResponse struct {
 	ID        string               `json:"id"`
 	Name      string               `json:"name"`
 	Content   string               `json:"content"`
-	Rules     []domain.SandboxRule  `json:"rules"`
+	Rules     []domain.SandboxRule `json:"rules"`
 	IsDefault bool                 `json:"is_default"`
 	CreatedAt string               `json:"created_at"`
 	UpdatedAt string               `json:"updated_at"`

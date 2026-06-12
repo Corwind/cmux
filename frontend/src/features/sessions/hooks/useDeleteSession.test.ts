@@ -20,7 +20,7 @@ describe("useDeleteSession", () => {
 
     const { result } = renderHook(() => useDeleteSession());
 
-    result.current.mutate({ id: "session-1" });
+    result.current.mutate("session-1");
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true);
@@ -34,7 +34,7 @@ describe("useDeleteSession", () => {
 
     const { result } = renderHook(() => useDeleteSession());
 
-    result.current.mutate({ id: "session-1" });
+    result.current.mutate("session-1");
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true);

@@ -53,8 +53,10 @@ func main() {
 	processManager := pty.NewManager(managerOpts...)
 	fileBrowser := filesystem.NewBrowser()
 	gitService := gitadapter.NewService()
+	worktreeRepo := sqlite.NewWorktreeRepository(repo)
 	sessionService := appservice.NewSessionService(repo, processManager, templateRepo,
 		appservice.WithGitService(gitService, cfg.Git.WorktreesDir),
+		appservice.WithWorktreeRepository(worktreeRepo),
 	)
 
 	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, gitService, cfg.Server.Port)

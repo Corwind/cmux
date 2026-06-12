@@ -11,8 +11,8 @@ import (
 
 	"github.com/Corwind/cmux/backend/internal/app"
 	"github.com/Corwind/cmux/backend/internal/ports"
-	"github.com/go-chi/chi/v5"
 	"github.com/coder/websocket"
+	"github.com/go-chi/chi/v5"
 )
 
 // ptyBridge manages a single PTY reader goroutine per session

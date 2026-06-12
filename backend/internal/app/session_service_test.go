@@ -136,10 +136,10 @@ func (m *mockSandboxProcessManager) SetSandboxContent(contents []string) {
 // --- Mock GitService ---
 
 type mockGitService struct {
-	infoFn          func(path string) (ports.GitInfo, error)
-	addWorktreeFn   func(repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error)
+	infoFn           func(path string) (ports.GitInfo, error)
+	addWorktreeFn    func(repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error)
 	removeWorktreeFn func(repoRoot, wtPath string, force bool) error
-	isCleanFn       func(path string) (bool, error)
+	isCleanFn        func(path string) (bool, error)
 	removedWorktrees []string
 	forceFlags       []bool
 }
@@ -360,7 +360,7 @@ func TestDeleteSession_KillsRunningProcess(t *testing.T) {
 	svc := NewSessionService(repo, pm, nil)
 
 	s, _ := svc.CreateSession(context.Background(), createInput("test", "/tmp"))
-	if err := svc.DeleteSession(context.Background(), s.ID, WorktreeActionKeep); err != nil {
+	if err := svc.DeleteSession(context.Background(), s.ID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Verify killed
@@ -385,7 +385,7 @@ func TestDeleteSession_NotFound(t *testing.T) {
 	pm := newMockProcessManager()
 	svc := NewSessionService(repo, pm, nil)
 
-	err := svc.DeleteSession(context.Background(), "nonexistent", WorktreeActionKeep)
+	err := svc.DeleteSession(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent session")
 	}
@@ -898,7 +898,7 @@ func TestCreateSession_WithWorktree_SpawnFailureCleansUp(t *testing.T) {
 	}
 }
 
-func TestDeleteSession_WorktreeKeep(t *testing.T) {
+func TestDeleteSession_DoesNotRemoveWorktree(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
 	git := newMockGitService()
@@ -915,100 +915,11 @@ func TestDeleteSession_WorktreeKeep(t *testing.T) {
 	}
 	_ = repo.Create(context.Background(), sess)
 
-	if err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionKeep); err != nil {
+	if err := svc.DeleteSession(context.Background(), "sess-wt"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// Worktree directory should NOT be removed by DeleteSession
 	if len(git.removedWorktrees) != 0 {
-		t.Error("expected worktree to NOT be removed with keep action")
+		t.Error("expected worktree to NOT be removed by DeleteSession")
 	}
-}
-
-func TestDeleteSession_WorktreeRemove_Clean(t *testing.T) {
-	repo := newMockRepo()
-	pm := newMockProcessManager()
-	git := newMockGitService()
-	git.isCleanFn = func(path string) (bool, error) { return true, nil }
-	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
-
-	sess := domain.Session{
-		ID:              "sess-wt",
-		Name:            "wt",
-		WorkingDir:      "/tmp/wt",
-		Status:          domain.StatusStopped,
-		RepoRoot:        "/repo",
-		WorktreeManaged: true,
-	}
-	_ = repo.Create(context.Background(), sess)
-
-	if err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionRemove); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(git.removedWorktrees) != 1 || git.removedWorktrees[0] != "/tmp/wt" {
-		t.Error("expected worktree to be removed")
-	}
-	if git.forceFlags[0] {
-		t.Error("expected non-force remove for clean worktree")
-	}
-}
-
-func TestDeleteSession_WorktreeRemove_Dirty_ReturnsError(t *testing.T) {
-	repo := newMockRepo()
-	pm := newMockProcessManager()
-	git := newMockGitService()
-	git.isCleanFn = func(path string) (bool, error) { return false, nil }
-	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
-
-	sess := domain.Session{
-		ID:              "sess-wt",
-		Name:            "wt",
-		WorkingDir:      "/tmp/wt",
-		Status:          domain.StatusStopped,
-		RepoRoot:        "/repo",
-		WorktreeManaged: true,
-	}
-	_ = repo.Create(context.Background(), sess)
-
-	err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionRemove)
-	if err == nil {
-		t.Fatal("expected error when removing dirty worktree without force")
-	}
-	var dirtyErr *ErrWorktreeDirty
-	if !isErrWorktreeDirty(err, &dirtyErr) {
-		t.Errorf("expected ErrWorktreeDirty, got %T: %v", err, err)
-	}
-}
-
-func TestDeleteSession_WorktreeForce(t *testing.T) {
-	repo := newMockRepo()
-	pm := newMockProcessManager()
-	git := newMockGitService()
-	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
-
-	sess := domain.Session{
-		ID:              "sess-wt",
-		Name:            "wt",
-		WorkingDir:      "/tmp/wt",
-		Status:          domain.StatusStopped,
-		RepoRoot:        "/repo",
-		WorktreeManaged: true,
-	}
-	_ = repo.Create(context.Background(), sess)
-
-	if err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionForce); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(git.removedWorktrees) != 1 {
-		t.Error("expected worktree to be force removed")
-	}
-	if !git.forceFlags[0] {
-		t.Error("expected force=true for force action")
-	}
-}
-
-func isErrWorktreeDirty(err error, target **ErrWorktreeDirty) bool {
-	d, ok := err.(*ErrWorktreeDirty)
-	if ok {
-		*target = d
-	}
-	return ok
 }

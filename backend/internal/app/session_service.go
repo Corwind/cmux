@@ -10,6 +10,7 @@ import (
 
 	"github.com/Corwind/cmux/backend/internal/domain"
 	"github.com/Corwind/cmux/backend/internal/ports"
+	"github.com/google/uuid"
 )
 
 // WorktreeSpec describes how to create or attach a git worktree for a session.
@@ -30,29 +31,12 @@ type CreateSessionInput struct {
 	Worktree        *WorktreeSpec
 }
 
-// WorktreeAction controls what happens to the worktree when a session is deleted.
-type WorktreeAction string
-
-const (
-	WorktreeActionKeep  WorktreeAction = "keep"
-	WorktreeActionRemove WorktreeAction = "remove"
-	WorktreeActionForce  WorktreeAction = "force"
-)
-
-// ErrWorktreeDirty is returned when trying to remove a dirty worktree without force.
-type ErrWorktreeDirty struct {
-	Path string
-}
-
-func (e *ErrWorktreeDirty) Error() string {
-	return fmt.Sprintf("worktree %q has uncommitted changes", e.Path)
-}
-
 type SessionService struct {
 	repo           ports.SessionRepository
 	processManager ports.ProcessManager
 	templateRepo   ports.TemplateRepository
 	gitService     ports.GitService
+	worktreeRepo   ports.WorktreeRepository
 	worktreesDir   string
 	mu             sync.RWMutex
 }
@@ -75,6 +59,12 @@ func WithGitService(svc ports.GitService, worktreesDir string) SessionServiceOpt
 	return func(s *SessionService) {
 		s.gitService = svc
 		s.worktreesDir = worktreesDir
+	}
+}
+
+func WithWorktreeRepository(repo ports.WorktreeRepository) SessionServiceOption {
+	return func(s *SessionService) {
+		s.worktreeRepo = repo
 	}
 }
 
@@ -151,9 +141,35 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		return domain.Session{}, fmt.Errorf("failed to store session: %w", err)
 	}
 
+	if worktreeManaged && s.worktreeRepo != nil {
+		s.trackWorktreeSession(ctx, session)
+	}
+
 	go s.watchProcess(session.ID, handle)
 
 	return session, nil
+}
+
+// trackWorktreeSession creates or adopts a ManagedWorktree record for the given
+// session and sets the session_id FK on the worktree record.
+func (s *SessionService) trackWorktreeSession(ctx context.Context, session domain.Session) {
+	wt, err := s.worktreeRepo.GetByPath(ctx, session.WorkingDir)
+	if err != nil {
+		wt = domain.ManagedWorktree{
+			ID:        uuid.New().String(),
+			Path:      session.WorkingDir,
+			Branch:    session.GitBranch,
+			RepoRoot:  session.RepoRoot,
+			CreatedAt: session.CreatedAt,
+		}
+		if createErr := s.worktreeRepo.Create(ctx, wt); createErr != nil {
+			log.Printf("failed to create worktree record for %s: %v", session.WorkingDir, createErr)
+			return
+		}
+	}
+	if setErr := s.worktreeRepo.SetSession(ctx, wt.ID, &session.ID); setErr != nil {
+		log.Printf("failed to set session %s on worktree %s: %v", session.ID, wt.ID, setErr)
+	}
 }
 
 func (s *SessionService) applySandboxContent(ctx context.Context, templateID string) {
@@ -255,7 +271,7 @@ func (s *SessionService) ListSessions(ctx context.Context) ([]domain.Session, er
 	return sessions, nil
 }
 
-func (s *SessionService) DeleteSession(ctx context.Context, id string, action WorktreeAction) error {
+func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 	session, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -265,23 +281,8 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string, action Wo
 		_ = s.processManager.Kill(session.PID)
 	}
 
-	if session.WorktreeManaged && s.gitService != nil {
-		switch action {
-		case WorktreeActionRemove:
-			clean, cleanErr := s.gitService.IsClean(session.WorkingDir)
-			if cleanErr == nil && !clean {
-				return &ErrWorktreeDirty{Path: session.WorkingDir}
-			}
-			if err := s.gitService.RemoveWorktree(session.RepoRoot, session.WorkingDir, false); err != nil {
-				return fmt.Errorf("remove worktree: %w", err)
-			}
-		case WorktreeActionForce:
-			if err := s.gitService.RemoveWorktree(session.RepoRoot, session.WorkingDir, true); err != nil {
-				return fmt.Errorf("force remove worktree: %w", err)
-			}
-		}
-	}
-
+	// The ON DELETE SET NULL FK automatically clears session_id in worktrees
+	// when the session row is deleted.
 	return s.repo.Delete(ctx, id)
 }
 
@@ -303,6 +304,83 @@ func (s *SessionService) GetPTYHandle(sessionID string) (*ports.PTYHandle, error
 
 func (s *SessionService) ResizePTY(pid int, rows, cols uint16) error {
 	return s.processManager.Resize(pid, rows, cols)
+}
+
+// ListWorktrees returns all managed worktrees with their associated session info.
+// It also auto-adopts any worktree_managed sessions not yet in the worktrees table.
+func (s *SessionService) ListWorktrees(ctx context.Context) ([]domain.WorktreeEntry, error) {
+	if s.worktreeRepo == nil {
+		return nil, nil
+	}
+
+	allSessions, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, sess := range allSessions {
+		if sess.WorktreeManaged {
+			s.trackWorktreeSession(ctx, sess)
+		}
+	}
+
+	wts, err := s.worktreeRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make([]domain.WorktreeEntry, 0, len(wts))
+	for _, wt := range wts {
+		entry := domain.WorktreeEntry{ManagedWorktree: wt}
+		if wt.SessionID != nil {
+			sess, err := s.repo.Get(ctx, *wt.SessionID)
+			if err == nil {
+				name := sess.Name
+				status := string(sess.Status)
+				entry.SessionName = &name
+				entry.SessionStatus = &status
+			} else {
+				// Session was deleted without cleanup; clear the FK reference
+				wt.SessionID = nil
+				entry.ManagedWorktree = wt
+			}
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+// ErrWorktreeHasSession is returned when trying to delete a worktree that
+// still has a linked session. Delete the session first to unlink it.
+type ErrWorktreeHasSession struct {
+	WorktreeID string
+	SessionID  string
+}
+
+func (e *ErrWorktreeHasSession) Error() string {
+	return fmt.Sprintf("cannot delete worktree %q: session %q is still linked — delete the session first", e.WorktreeID, e.SessionID)
+}
+
+// DeleteWorktree removes a worktree. Returns ErrWorktreeHasSession if a
+// session is still linked to it.
+func (s *SessionService) DeleteWorktree(ctx context.Context, id string) error {
+	if s.worktreeRepo == nil {
+		return fmt.Errorf("worktree repository not configured")
+	}
+
+	wt, err := s.worktreeRepo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if wt.SessionID != nil {
+		return &ErrWorktreeHasSession{WorktreeID: id, SessionID: *wt.SessionID}
+	}
+
+	if s.gitService != nil {
+		_ = s.gitService.RemoveWorktree(wt.RepoRoot, wt.Path, false)
+	}
+
+	return s.worktreeRepo.Delete(ctx, id)
 }
 
 func (s *SessionService) watchProcess(sessionID string, handle *ports.PTYHandle) {
