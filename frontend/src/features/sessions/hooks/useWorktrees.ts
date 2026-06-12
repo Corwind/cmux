@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { toast } from "@/components/ui/Toast";
 import type { WorktreeEntry } from "../types";
 
 export const worktreeKeys = {
@@ -25,6 +26,10 @@ export function useDeleteWorktree() {
     mutationFn: (id: string) => apiClient.delete<void>(`/worktrees/${id}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: worktreeKeys.all });
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Failed to delete worktree.";
+      toast("error", "Cannot delete worktree", message);
     },
   });
 }
