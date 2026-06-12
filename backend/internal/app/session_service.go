@@ -360,8 +360,20 @@ func (e *ErrWorktreeHasSessions) Error() string {
 	return fmt.Sprintf("worktree %q still has %d session(s)", e.WorktreeID, e.Count)
 }
 
+// ErrWorktreeSessionRunning is returned when trying to delete a worktree whose
+// linked session is currently running.
+type ErrWorktreeSessionRunning struct {
+	WorktreeID string
+	SessionID  string
+}
+
+func (e *ErrWorktreeSessionRunning) Error() string {
+	return fmt.Sprintf("cannot delete worktree %q: session %q is currently running", e.WorktreeID, e.SessionID)
+}
+
 // DeleteOrphanedWorktree removes a worktree that has no linked session.
-// Pass force=true to remove it even if a session is still linked.
+// Pass force=true to remove it even if a session is still linked (but never
+// when the session is running — stop it first).
 func (s *SessionService) DeleteOrphanedWorktree(ctx context.Context, id string, force bool) error {
 	if s.worktreeRepo == nil {
 		return fmt.Errorf("worktree repository not configured")
@@ -372,8 +384,12 @@ func (s *SessionService) DeleteOrphanedWorktree(ctx context.Context, id string, 
 		return err
 	}
 
-	if !force {
-		if wt.SessionID != nil {
+	if wt.SessionID != nil {
+		sess, err := s.repo.Get(ctx, *wt.SessionID)
+		if err == nil && sess.Status == domain.StatusRunning {
+			return &ErrWorktreeSessionRunning{WorktreeID: id, SessionID: *wt.SessionID}
+		}
+		if !force {
 			return &ErrWorktreeHasSessions{WorktreeID: id, Count: 1}
 		}
 	}

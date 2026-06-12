@@ -358,7 +358,10 @@ func TestDeleteOrphanedWorktree_HasSessions_ReturnsError(t *testing.T) {
 	wtr := newMockWorktreeRepo()
 	svc := NewSessionService(repo, pm, nil, WithWorktreeRepository(wtr))
 
-	sessID := "sess-1"
+	// Stopped session — not running, so ErrWorktreeHasSessions (not ErrWorktreeSessionRunning)
+	sess := domain.Session{ID: "sess-1", Name: "s", WorkingDir: "/tmp/wt1", Status: domain.StatusStopped}
+	_ = repo.Create(context.Background(), sess)
+	sessID := sess.ID
 	wtRecord := domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt1", RepoRoot: "/repo", SessionID: &sessID, CreatedAt: time.Now()}
 	_ = wtr.Create(context.Background(), wtRecord)
 	_ = wtr.SetSession(context.Background(), "wt-1", &sessID)
@@ -378,7 +381,9 @@ func TestDeleteOrphanedWorktree_Force_DeletesWithSessions(t *testing.T) {
 	wtr := newMockWorktreeRepo()
 	svc := NewSessionService(repo, pm, nil, WithWorktreeRepository(wtr))
 
-	sessID := "sess-1"
+	sess := domain.Session{ID: "sess-1", Name: "s", WorkingDir: "/tmp/wt1", Status: domain.StatusStopped}
+	_ = repo.Create(context.Background(), sess)
+	sessID := sess.ID
 	wtRecord := domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt1", RepoRoot: "/repo", SessionID: &sessID, CreatedAt: time.Now()}
 	_ = wtr.Create(context.Background(), wtRecord)
 	_ = wtr.SetSession(context.Background(), "wt-1", &sessID)
@@ -388,5 +393,29 @@ func TestDeleteOrphanedWorktree_Force_DeletesWithSessions(t *testing.T) {
 	}
 	if _, err := wtr.Get(context.Background(), "wt-1"); err == nil {
 		t.Error("expected worktree record to be deleted with force=true")
+	}
+}
+
+func TestDeleteOrphanedWorktree_RunningSession_BlocksEvenWithForce(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	wtr := newMockWorktreeRepo()
+	svc := NewSessionService(repo, pm, nil, WithWorktreeRepository(wtr))
+
+	sess := domain.Session{ID: "sess-running", Name: "s", WorkingDir: "/tmp/wt1", Status: domain.StatusRunning}
+	_ = repo.Create(context.Background(), sess)
+	sessID := sess.ID
+	wtRecord := domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt1", RepoRoot: "/repo", SessionID: &sessID, CreatedAt: time.Now()}
+	_ = wtr.Create(context.Background(), wtRecord)
+	_ = wtr.SetSession(context.Background(), "wt-1", &sessID)
+
+	for _, force := range []bool{false, true} {
+		err := svc.DeleteOrphanedWorktree(context.Background(), "wt-1", force)
+		if err == nil {
+			t.Fatalf("expected error when session is running (force=%v)", force)
+		}
+		if _, ok := err.(*ErrWorktreeSessionRunning); !ok {
+			t.Errorf("expected ErrWorktreeSessionRunning (force=%v), got %T: %v", force, err, err)
+		}
 	}
 }

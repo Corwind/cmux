@@ -65,6 +65,8 @@ func (h *worktreeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	err := h.service.DeleteOrphanedWorktree(r.Context(), id, force)
 	if err != nil {
 		switch err.(type) {
+		case *app.ErrWorktreeSessionRunning:
+			http.Error(w, err.Error(), http.StatusConflict)
 		case *app.ErrWorktreeHasSessions:
 			http.Error(w, err.Error(), http.StatusConflict)
 		default:
