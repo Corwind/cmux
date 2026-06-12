@@ -349,32 +349,20 @@ func (s *SessionService) ListWorktrees(ctx context.Context) ([]domain.WorktreeEn
 	return entries, nil
 }
 
-// ErrWorktreeHasSessions is returned when trying to delete a worktree that
-// still has an active session and force is not set.
-type ErrWorktreeHasSessions struct {
-	WorktreeID string
-	Count      int
-}
-
-func (e *ErrWorktreeHasSessions) Error() string {
-	return fmt.Sprintf("worktree %q still has %d session(s)", e.WorktreeID, e.Count)
-}
-
-// ErrWorktreeSessionRunning is returned when trying to delete a worktree whose
-// linked session is currently running.
-type ErrWorktreeSessionRunning struct {
+// ErrWorktreeHasSession is returned when trying to delete a worktree that
+// still has a linked session. Delete the session first to unlink it.
+type ErrWorktreeHasSession struct {
 	WorktreeID string
 	SessionID  string
 }
 
-func (e *ErrWorktreeSessionRunning) Error() string {
-	return fmt.Sprintf("cannot delete worktree %q: session %q is currently running", e.WorktreeID, e.SessionID)
+func (e *ErrWorktreeHasSession) Error() string {
+	return fmt.Sprintf("cannot delete worktree %q: session %q is still linked — delete the session first", e.WorktreeID, e.SessionID)
 }
 
-// DeleteOrphanedWorktree removes a worktree that has no linked session.
-// Pass force=true to remove it even if a session is still linked (but never
-// when the session is running — stop it first).
-func (s *SessionService) DeleteOrphanedWorktree(ctx context.Context, id string, force bool) error {
+// DeleteWorktree removes a worktree. Returns ErrWorktreeHasSession if a
+// session is still linked to it.
+func (s *SessionService) DeleteWorktree(ctx context.Context, id string) error {
 	if s.worktreeRepo == nil {
 		return fmt.Errorf("worktree repository not configured")
 	}
@@ -385,17 +373,11 @@ func (s *SessionService) DeleteOrphanedWorktree(ctx context.Context, id string, 
 	}
 
 	if wt.SessionID != nil {
-		sess, err := s.repo.Get(ctx, *wt.SessionID)
-		if err == nil && sess.Status == domain.StatusRunning {
-			return &ErrWorktreeSessionRunning{WorktreeID: id, SessionID: *wt.SessionID}
-		}
-		if !force {
-			return &ErrWorktreeHasSessions{WorktreeID: id, Count: 1}
-		}
+		return &ErrWorktreeHasSession{WorktreeID: id, SessionID: *wt.SessionID}
 	}
 
 	if s.gitService != nil {
-		_ = s.gitService.RemoveWorktree(wt.RepoRoot, wt.Path, force)
+		_ = s.gitService.RemoveWorktree(wt.RepoRoot, wt.Path, false)
 	}
 
 	return s.worktreeRepo.Delete(ctx, id)

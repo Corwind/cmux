@@ -86,29 +86,21 @@ export function WorktreePanel() {
                   </button>
                   <button
                     type="button"
-                    disabled={entry.session_status === "running"}
-                    onClick={() => {
-                      if (entry.session_id) {
-                        const confirmed = window.confirm(
-                          `Delete worktree ${entry.branch}? The session using it will be unlinked.`,
-                        );
-                        if (!confirmed) return;
-                      }
-                      deleteWorktree.mutate({ id: entry.id });
-                    }}
+                    disabled={!!entry.session_id}
+                    onClick={() => deleteWorktree.mutate(entry.id)}
                     className="ml-1 shrink-0 rounded p-0.5 transition-colors"
                     style={{
                       color: "var(--cmux-text-faint)",
-                      opacity: entry.session_status === "running" ? 0.3 : 1,
-                      cursor: entry.session_status === "running" ? "not-allowed" : "pointer",
+                      opacity: entry.session_id ? 0.3 : 1,
+                      cursor: entry.session_id ? "not-allowed" : "pointer",
                     }}
                     title={
-                      entry.session_status === "running"
-                        ? "Stop the session before deleting this worktree"
+                      entry.session_id
+                        ? "Delete the session first to remove this worktree"
                         : "Delete worktree"
                     }
                     onMouseEnter={(e) => {
-                      if (entry.session_status !== "running") {
+                      if (!entry.session_id) {
                         e.currentTarget.style.backgroundColor = "var(--cmux-surface-hover)";
                         e.currentTarget.style.color = "#f87171";
                       }

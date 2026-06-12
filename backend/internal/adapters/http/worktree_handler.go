@@ -60,18 +60,14 @@ func (h *worktreeHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *worktreeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	force := r.URL.Query().Get("force") == "true"
 
-	err := h.service.DeleteOrphanedWorktree(r.Context(), id, force)
+	err := h.service.DeleteWorktree(r.Context(), id)
 	if err != nil {
-		switch err.(type) {
-		case *app.ErrWorktreeSessionRunning:
+		if _, ok := err.(*app.ErrWorktreeHasSession); ok {
 			http.Error(w, err.Error(), http.StatusConflict)
-		case *app.ErrWorktreeHasSessions:
-			http.Error(w, err.Error(), http.StatusConflict)
-		default:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

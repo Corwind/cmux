@@ -18,16 +18,11 @@ export function useWorktrees() {
   });
 }
 
-interface DeleteWorktreeArgs {
-  id: string;
-}
-
 export function useDeleteWorktree() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id }: DeleteWorktreeArgs) =>
-      apiClient.delete<void>(`/worktrees/${id}`),
+    mutationFn: (id: string) => apiClient.delete<void>(`/worktrees/${id}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: worktreeKeys.all });
     },
