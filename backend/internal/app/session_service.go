@@ -31,24 +31,6 @@ type CreateSessionInput struct {
 	Worktree        *WorktreeSpec
 }
 
-// WorktreeAction controls what happens to the worktree when a session is deleted.
-type WorktreeAction string
-
-const (
-	WorktreeActionKeep  WorktreeAction = "keep"
-	WorktreeActionRemove WorktreeAction = "remove"
-	WorktreeActionForce  WorktreeAction = "force"
-)
-
-// ErrWorktreeDirty is returned when trying to remove a dirty worktree without force.
-type ErrWorktreeDirty struct {
-	Path string
-}
-
-func (e *ErrWorktreeDirty) Error() string {
-	return fmt.Sprintf("worktree %q has uncommitted changes", e.Path)
-}
-
 type SessionService struct {
 	repo           ports.SessionRepository
 	processManager ports.ProcessManager
@@ -169,7 +151,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 }
 
 // trackWorktreeSession creates or adopts a ManagedWorktree record for the given
-// session and links them via the junction table.
+// session and sets the session_id FK on the worktree record.
 func (s *SessionService) trackWorktreeSession(ctx context.Context, session domain.Session) {
 	wt, err := s.worktreeRepo.GetByPath(ctx, session.WorkingDir)
 	if err != nil {
@@ -185,8 +167,8 @@ func (s *SessionService) trackWorktreeSession(ctx context.Context, session domai
 			return
 		}
 	}
-	if linkErr := s.worktreeRepo.LinkSession(ctx, wt.ID, session.ID); linkErr != nil {
-		log.Printf("failed to link session %s to worktree %s: %v", session.ID, wt.ID, linkErr)
+	if setErr := s.worktreeRepo.SetSession(ctx, wt.ID, &session.ID); setErr != nil {
+		log.Printf("failed to set session %s on worktree %s: %v", session.ID, wt.ID, setErr)
 	}
 }
 
@@ -289,7 +271,7 @@ func (s *SessionService) ListSessions(ctx context.Context) ([]domain.Session, er
 	return sessions, nil
 }
 
-func (s *SessionService) DeleteSession(ctx context.Context, id string, action WorktreeAction) error {
+func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 	session, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -299,35 +281,8 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string, action Wo
 		_ = s.processManager.Kill(session.PID)
 	}
 
-	if session.WorktreeManaged && s.gitService != nil {
-		switch action {
-		case WorktreeActionRemove:
-			clean, cleanErr := s.gitService.IsClean(session.WorkingDir)
-			if cleanErr == nil && !clean {
-				return &ErrWorktreeDirty{Path: session.WorkingDir}
-			}
-			if err := s.gitService.RemoveWorktree(session.RepoRoot, session.WorkingDir, false); err != nil {
-				return fmt.Errorf("remove worktree: %w", err)
-			}
-			if s.worktreeRepo != nil {
-				_ = s.worktreeRepo.DeleteByPath(ctx, session.WorkingDir)
-			}
-		case WorktreeActionForce:
-			if err := s.gitService.RemoveWorktree(session.RepoRoot, session.WorkingDir, true); err != nil {
-				return fmt.Errorf("force remove worktree: %w", err)
-			}
-			if s.worktreeRepo != nil {
-				_ = s.worktreeRepo.DeleteByPath(ctx, session.WorkingDir)
-			}
-		case WorktreeActionKeep:
-			if s.worktreeRepo != nil {
-				_ = s.worktreeRepo.UnlinkSession(ctx, id)
-			}
-		}
-	} else if s.worktreeRepo != nil {
-		_ = s.worktreeRepo.UnlinkSession(ctx, id)
-	}
-
+	// The ON DELETE SET NULL FK automatically clears session_id in worktrees
+	// when the session row is deleted.
 	return s.repo.Delete(ctx, id)
 }
 
@@ -351,7 +306,7 @@ func (s *SessionService) ResizePTY(pid int, rows, cols uint16) error {
 	return s.processManager.Resize(pid, rows, cols)
 }
 
-// ListWorktrees returns all managed worktrees with their associated sessions.
+// ListWorktrees returns all managed worktrees with their associated session info.
 // It also auto-adopts any worktree_managed sessions not yet in the worktrees table.
 func (s *SessionService) ListWorktrees(ctx context.Context) ([]domain.WorktreeEntry, error) {
 	if s.worktreeRepo == nil {
@@ -375,23 +330,27 @@ func (s *SessionService) ListWorktrees(ctx context.Context) ([]domain.WorktreeEn
 
 	entries := make([]domain.WorktreeEntry, 0, len(wts))
 	for _, wt := range wts {
-		sessionIDs, _ := s.worktreeRepo.ListSessionIDs(ctx, wt.ID)
-		var sessions []domain.Session
-		for _, sid := range sessionIDs {
-			if sess, err := s.repo.Get(ctx, sid); err == nil {
-				sessions = append(sessions, sess)
+		entry := domain.WorktreeEntry{ManagedWorktree: wt}
+		if wt.SessionID != nil {
+			sess, err := s.repo.Get(ctx, *wt.SessionID)
+			if err == nil {
+				name := sess.Name
+				status := string(sess.Status)
+				entry.SessionName = &name
+				entry.SessionStatus = &status
+			} else {
+				// Session was deleted without cleanup; clear the FK reference
+				wt.SessionID = nil
+				entry.ManagedWorktree = wt
 			}
 		}
-		entries = append(entries, domain.WorktreeEntry{
-			ManagedWorktree: wt,
-			Sessions:        sessions,
-		})
+		entries = append(entries, entry)
 	}
 	return entries, nil
 }
 
 // ErrWorktreeHasSessions is returned when trying to delete a worktree that
-// still has active sessions and force is not set.
+// still has an active session and force is not set.
 type ErrWorktreeHasSessions struct {
 	WorktreeID string
 	Count      int
@@ -401,8 +360,8 @@ func (e *ErrWorktreeHasSessions) Error() string {
 	return fmt.Sprintf("worktree %q still has %d session(s)", e.WorktreeID, e.Count)
 }
 
-// DeleteOrphanedWorktree removes a worktree that has no linked sessions.
-// Pass force=true to remove it even if sessions are still linked.
+// DeleteOrphanedWorktree removes a worktree that has no linked session.
+// Pass force=true to remove it even if a session is still linked.
 func (s *SessionService) DeleteOrphanedWorktree(ctx context.Context, id string, force bool) error {
 	if s.worktreeRepo == nil {
 		return fmt.Errorf("worktree repository not configured")
@@ -414,12 +373,8 @@ func (s *SessionService) DeleteOrphanedWorktree(ctx context.Context, id string, 
 	}
 
 	if !force {
-		sessionIDs, err := s.worktreeRepo.ListSessionIDs(ctx, id)
-		if err != nil {
-			return err
-		}
-		if len(sessionIDs) > 0 {
-			return &ErrWorktreeHasSessions{WorktreeID: id, Count: len(sessionIDs)}
+		if wt.SessionID != nil {
+			return &ErrWorktreeHasSessions{WorktreeID: id, Count: 1}
 		}
 	}
 

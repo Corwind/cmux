@@ -2,7 +2,6 @@ package http
 
 import (
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 
@@ -166,17 +165,7 @@ func (h *SessionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 func (h *SessionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	action := app.WorktreeAction(r.URL.Query().Get("worktree"))
-	if action == "" {
-		action = app.WorktreeActionKeep
-	}
-
-	if err := h.service.DeleteSession(r.Context(), id, action); err != nil {
-		var dirtyErr *app.ErrWorktreeDirty
-		if errors.As(err, &dirtyErr) {
-			http.Error(w, dirtyErr.Error(), http.StatusConflict)
-			return
-		}
+	if err := h.service.DeleteSession(r.Context(), id); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

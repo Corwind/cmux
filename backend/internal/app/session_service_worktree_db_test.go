@@ -12,18 +12,14 @@ import (
 // --- Mock WorktreeRepository ---
 
 type mockWorktreeRepo struct {
-	worktrees  map[string]domain.ManagedWorktree
-	byPath     map[string]string // path → id
-	links      map[string][]string // worktree_id → []session_id
-	sessionMap map[string]string   // session_id → worktree_id
+	worktrees map[string]domain.ManagedWorktree
+	byPath    map[string]string // path → id
 }
 
 func newMockWorktreeRepo() *mockWorktreeRepo {
 	return &mockWorktreeRepo{
-		worktrees:  make(map[string]domain.ManagedWorktree),
-		byPath:     make(map[string]string),
-		links:      make(map[string][]string),
-		sessionMap: make(map[string]string),
+		worktrees: make(map[string]domain.ManagedWorktree),
+		byPath:    make(map[string]string),
 	}
 }
 
@@ -67,7 +63,6 @@ func (m *mockWorktreeRepo) Delete(ctx context.Context, id string) error {
 	}
 	delete(m.byPath, wt.Path)
 	delete(m.worktrees, id)
-	delete(m.links, id)
 	return nil
 }
 
@@ -79,36 +74,14 @@ func (m *mockWorktreeRepo) DeleteByPath(ctx context.Context, path string) error 
 	return m.Delete(ctx, id)
 }
 
-func (m *mockWorktreeRepo) LinkSession(ctx context.Context, worktreeID, sessionID string) error {
-	for _, sid := range m.links[worktreeID] {
-		if sid == sessionID {
-			return nil // idempotent
-		}
-	}
-	m.links[worktreeID] = append(m.links[worktreeID], sessionID)
-	m.sessionMap[sessionID] = worktreeID
-	return nil
-}
-
-func (m *mockWorktreeRepo) UnlinkSession(ctx context.Context, sessionID string) error {
-	wtID, ok := m.sessionMap[sessionID]
+func (m *mockWorktreeRepo) SetSession(ctx context.Context, worktreeID string, sessionID *string) error {
+	wt, ok := m.worktrees[worktreeID]
 	if !ok {
 		return nil
 	}
-	sids := m.links[wtID]
-	filtered := sids[:0]
-	for _, sid := range sids {
-		if sid != sessionID {
-			filtered = append(filtered, sid)
-		}
-	}
-	m.links[wtID] = filtered
-	delete(m.sessionMap, sessionID)
+	wt.SessionID = sessionID
+	m.worktrees[worktreeID] = wt
 	return nil
-}
-
-func (m *mockWorktreeRepo) ListSessionIDs(ctx context.Context, worktreeID string) ([]string, error) {
-	return m.links[worktreeID], nil
 }
 
 // Compile-time check
@@ -150,10 +123,9 @@ func TestCreateSession_WithWorktree_TracksInDB(t *testing.T) {
 		t.Errorf("expected branch 'feature/wt', got %q", wt.Branch)
 	}
 
-	// Session must be linked
-	ids, _ := wtr.ListSessionIDs(context.Background(), wt.ID)
-	if len(ids) != 1 || ids[0] != session.ID {
-		t.Errorf("expected session %q linked to worktree, got %v", session.ID, ids)
+	// SessionID must be set on the worktree
+	if wt.SessionID == nil || *wt.SessionID != session.ID {
+		t.Errorf("expected SessionID %q on worktree, got %v", session.ID, wt.SessionID)
 	}
 }
 
@@ -197,14 +169,18 @@ func TestCreateSession_WithWorktree_AdoptsExistingRecord(t *testing.T) {
 	if len(wts) != 1 {
 		t.Errorf("expected 1 worktree record, got %d", len(wts))
 	}
-	// Session linked to the pre-existing record
-	ids, _ := wtr.ListSessionIDs(context.Background(), "existing-wt")
-	if len(ids) != 1 || ids[0] != session.ID {
-		t.Errorf("expected session linked to existing worktree, got %v", ids)
+
+	// Session linked to the pre-existing record via SessionID
+	wt, err := wtr.Get(context.Background(), "existing-wt")
+	if err != nil {
+		t.Fatalf("Get existing-wt failed: %v", err)
+	}
+	if wt.SessionID == nil || *wt.SessionID != session.ID {
+		t.Errorf("expected session linked to existing worktree via SessionID, got %v", wt.SessionID)
 	}
 }
 
-func TestDeleteSession_WorktreeKeep_UnlinksSession(t *testing.T) {
+func TestDeleteSession_Always_KeepsWorktreeRecord(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
 	git := newMockGitService()
@@ -225,96 +201,34 @@ func TestDeleteSession_WorktreeKeep_UnlinksSession(t *testing.T) {
 	}
 	_ = repo.Create(context.Background(), sess)
 
+	sessID := "sess-wt"
 	wtRecord := domain.ManagedWorktree{
 		ID:        "wt-id",
 		Path:      "/tmp/wt",
 		Branch:    "feature/wt",
 		RepoRoot:  "/repo",
+		SessionID: &sessID,
 		CreatedAt: time.Now(),
 	}
 	_ = wtr.Create(context.Background(), wtRecord)
-	_ = wtr.LinkSession(context.Background(), "wt-id", "sess-wt")
+	// Manually set the SessionID since Create is idempotent by path
+	_ = wtr.SetSession(context.Background(), "wt-id", &sessID)
 
-	if err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionKeep); err != nil {
+	if err := svc.DeleteSession(context.Background(), "sess-wt"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Worktree record must still exist
-	if _, err := wtr.Get(context.Background(), "wt-id"); err != nil {
-		t.Error("worktree record should still exist after keep")
-	}
-	// Session unlinked
-	ids, _ := wtr.ListSessionIDs(context.Background(), "wt-id")
-	if len(ids) != 0 {
-		t.Errorf("expected session to be unlinked, got %v", ids)
-	}
-}
-
-func TestDeleteSession_WorktreeRemove_DeletesRecord(t *testing.T) {
-	repo := newMockRepo()
-	pm := newMockProcessManager()
-	git := newMockGitService()
-	git.isCleanFn = func(path string) (bool, error) { return true, nil }
-	wtr := newMockWorktreeRepo()
-	svc := NewSessionService(repo, pm, nil,
-		WithGitService(git, "/tmp/worktrees"),
-		WithWorktreeRepository(wtr),
-	)
-
-	sess := domain.Session{
-		ID:              "sess-wt",
-		Name:            "wt",
-		WorkingDir:      "/tmp/wt",
-		Status:          domain.StatusStopped,
-		RepoRoot:        "/repo",
-		WorktreeManaged: true,
-	}
-	_ = repo.Create(context.Background(), sess)
-
-	wtRecord := domain.ManagedWorktree{ID: "wt-id", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()}
-	_ = wtr.Create(context.Background(), wtRecord)
-	_ = wtr.LinkSession(context.Background(), "wt-id", "sess-wt")
-
-	if err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionRemove); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	wt, err := wtr.Get(context.Background(), "wt-id")
+	if err != nil {
+		t.Error("worktree record should still exist after session delete")
 	}
 
-	// Worktree record must be gone
-	if _, err := wtr.Get(context.Background(), "wt-id"); err == nil {
-		t.Error("expected worktree record to be deleted after remove")
-	}
-}
-
-func TestDeleteSession_WorktreeForce_DeletesRecord(t *testing.T) {
-	repo := newMockRepo()
-	pm := newMockProcessManager()
-	git := newMockGitService()
-	wtr := newMockWorktreeRepo()
-	svc := NewSessionService(repo, pm, nil,
-		WithGitService(git, "/tmp/worktrees"),
-		WithWorktreeRepository(wtr),
-	)
-
-	sess := domain.Session{
-		ID:              "sess-wt",
-		Name:            "wt",
-		WorkingDir:      "/tmp/wt",
-		Status:          domain.StatusStopped,
-		RepoRoot:        "/repo",
-		WorktreeManaged: true,
-	}
-	_ = repo.Create(context.Background(), sess)
-
-	wtRecord := domain.ManagedWorktree{ID: "wt-id", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()}
-	_ = wtr.Create(context.Background(), wtRecord)
-	_ = wtr.LinkSession(context.Background(), "wt-id", "sess-wt")
-
-	if err := svc.DeleteSession(context.Background(), "sess-wt", WorktreeActionForce); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if _, err := wtr.Get(context.Background(), "wt-id"); err == nil {
-		t.Error("expected worktree record to be deleted after force remove")
+	// In a real DB the FK ON DELETE SET NULL would clear SessionID automatically.
+	// The mock simulates this by showing session is gone from repo.
+	_ = wt
+	if _, err := repo.Get(context.Background(), "sess-wt"); err == nil {
+		t.Error("expected session to be deleted from repo")
 	}
 }
 
@@ -328,13 +242,15 @@ func TestListWorktrees_ReturnsEntries(t *testing.T) {
 		WithWorktreeRepository(wtr),
 	)
 
-	// Create a worktree record and link a session
-	wtRecord := domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt1", Branch: "feat", RepoRoot: "/repo", CreatedAt: time.Now()}
-	_ = wtr.Create(context.Background(), wtRecord)
-
-	sess := domain.Session{ID: "sess-1", Name: "s", WorkingDir: "/tmp/wt1", Status: domain.StatusStopped, WorktreeManaged: true, GitBranch: "feat", RepoRoot: "/repo"}
+	// Create a session
+	sess := domain.Session{ID: "sess-1", Name: "my-session", WorkingDir: "/tmp/wt1", Status: domain.StatusStopped, WorktreeManaged: true, GitBranch: "feat", RepoRoot: "/repo"}
 	_ = repo.Create(context.Background(), sess)
-	_ = wtr.LinkSession(context.Background(), "wt-1", "sess-1")
+
+	// Create a worktree record with SessionID set
+	sessID := "sess-1"
+	wtRecord := domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt1", Branch: "feat", RepoRoot: "/repo", SessionID: &sessID, CreatedAt: time.Now()}
+	_ = wtr.Create(context.Background(), wtRecord)
+	_ = wtr.SetSession(context.Background(), "wt-1", &sessID)
 
 	entries, err := svc.ListWorktrees(context.Background())
 	if err != nil {
@@ -346,8 +262,11 @@ func TestListWorktrees_ReturnsEntries(t *testing.T) {
 	if entries[0].ID != "wt-1" {
 		t.Errorf("expected worktree ID 'wt-1', got %q", entries[0].ID)
 	}
-	if len(entries[0].Sessions) != 1 {
-		t.Errorf("expected 1 session in entry, got %d", len(entries[0].Sessions))
+	if entries[0].SessionName == nil || *entries[0].SessionName != "my-session" {
+		t.Errorf("expected SessionName 'my-session', got %v", entries[0].SessionName)
+	}
+	if entries[0].SessionStatus == nil || *entries[0].SessionStatus != string(domain.StatusStopped) {
+		t.Errorf("expected SessionStatus %q, got %v", domain.StatusStopped, entries[0].SessionStatus)
 	}
 }
 
@@ -379,8 +298,11 @@ func TestListWorktrees_AutoAdoptsUntracked(t *testing.T) {
 	if entries[0].Path != "/tmp/old-wt" {
 		t.Errorf("expected path '/tmp/old-wt', got %q", entries[0].Path)
 	}
-	if len(entries[0].Sessions) != 1 {
-		t.Errorf("expected 1 session linked after auto-adopt, got %d", len(entries[0].Sessions))
+	if entries[0].SessionName == nil || *entries[0].SessionName != "old" {
+		t.Errorf("expected SessionName 'old' after auto-adopt, got %v", entries[0].SessionName)
+	}
+	if entries[0].SessionStatus == nil {
+		t.Error("expected SessionStatus to be set after auto-adopt")
 	}
 }
 
@@ -390,7 +312,7 @@ func TestListWorktrees_OrphanedWorktree_NoSessions(t *testing.T) {
 	wtr := newMockWorktreeRepo()
 	svc := NewSessionService(repo, pm, nil, WithWorktreeRepository(wtr))
 
-	// Worktree record exists but no sessions
+	// Worktree record exists but no session
 	wtRecord := domain.ManagedWorktree{ID: "wt-orphan", Path: "/tmp/orphan", Branch: "feat", RepoRoot: "/repo", CreatedAt: time.Now()}
 	_ = wtr.Create(context.Background(), wtRecord)
 
@@ -401,8 +323,11 @@ func TestListWorktrees_OrphanedWorktree_NoSessions(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry for orphaned worktree, got %d", len(entries))
 	}
-	if len(entries[0].Sessions) != 0 {
-		t.Errorf("expected 0 sessions for orphaned worktree, got %d", len(entries[0].Sessions))
+	if entries[0].SessionID != nil {
+		t.Errorf("expected nil SessionID for orphaned worktree, got %v", entries[0].SessionID)
+	}
+	if entries[0].SessionName != nil {
+		t.Errorf("expected nil SessionName for orphaned worktree, got %v", entries[0].SessionName)
 	}
 }
 
@@ -433,15 +358,14 @@ func TestDeleteOrphanedWorktree_HasSessions_ReturnsError(t *testing.T) {
 	wtr := newMockWorktreeRepo()
 	svc := NewSessionService(repo, pm, nil, WithWorktreeRepository(wtr))
 
-	wtRecord := domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt1", RepoRoot: "/repo", CreatedAt: time.Now()}
+	sessID := "sess-1"
+	wtRecord := domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt1", RepoRoot: "/repo", SessionID: &sessID, CreatedAt: time.Now()}
 	_ = wtr.Create(context.Background(), wtRecord)
-	sess := domain.Session{ID: "sess-1", Name: "s", WorkingDir: "/tmp/wt1", Status: domain.StatusRunning}
-	_ = repo.Create(context.Background(), sess)
-	_ = wtr.LinkSession(context.Background(), "wt-1", "sess-1")
+	_ = wtr.SetSession(context.Background(), "wt-1", &sessID)
 
 	err := svc.DeleteOrphanedWorktree(context.Background(), "wt-1", false)
 	if err == nil {
-		t.Fatal("expected error when deleting worktree with active sessions")
+		t.Fatal("expected error when deleting worktree with active session")
 	}
 	if _, ok := err.(*ErrWorktreeHasSessions); !ok {
 		t.Errorf("expected ErrWorktreeHasSessions, got %T: %v", err, err)
@@ -454,11 +378,10 @@ func TestDeleteOrphanedWorktree_Force_DeletesWithSessions(t *testing.T) {
 	wtr := newMockWorktreeRepo()
 	svc := NewSessionService(repo, pm, nil, WithWorktreeRepository(wtr))
 
-	wtRecord := domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt1", RepoRoot: "/repo", CreatedAt: time.Now()}
+	sessID := "sess-1"
+	wtRecord := domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt1", RepoRoot: "/repo", SessionID: &sessID, CreatedAt: time.Now()}
 	_ = wtr.Create(context.Background(), wtRecord)
-	sess := domain.Session{ID: "sess-1", Name: "s", WorkingDir: "/tmp/wt1", Status: domain.StatusRunning}
-	_ = repo.Create(context.Background(), sess)
-	_ = wtr.LinkSession(context.Background(), "wt-1", "sess-1")
+	_ = wtr.SetSession(context.Background(), "wt-1", &sessID)
 
 	if err := svc.DeleteOrphanedWorktree(context.Background(), "wt-1", true); err != nil {
 		t.Fatalf("unexpected error with force=true: %v", err)

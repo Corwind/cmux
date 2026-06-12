@@ -134,7 +134,7 @@ func TestWorktreeRepo_DeleteByPath(t *testing.T) {
 	}
 }
 
-func TestWorktreeRepo_LinkAndListSessions(t *testing.T) {
+func TestWorktreeRepo_SetAndClearSession(t *testing.T) {
 	repo := setupTestRepo(t)
 	wtr := NewWorktreeRepository(repo)
 	ctx := context.Background()
@@ -142,86 +142,65 @@ func TestWorktreeRepo_LinkAndListSessions(t *testing.T) {
 	wt := makeWorktree("wt-1", "/tmp/wt1")
 	_ = wtr.Create(ctx, wt)
 
-	// Create sessions in the sessions table so the FK is satisfied
-	s1 := makeSession("s1")
-	s2 := makeSession("s2")
-	_ = repo.Create(ctx, s1)
-	_ = repo.Create(ctx, s2)
+	// Create a session so the FK is satisfied
+	s := makeSession("s1")
+	_ = repo.Create(ctx, s)
 
-	if err := wtr.LinkSession(ctx, wt.ID, s1.ID); err != nil {
-		t.Fatalf("LinkSession s1 failed: %v", err)
-	}
-	if err := wtr.LinkSession(ctx, wt.ID, s2.ID); err != nil {
-		t.Fatalf("LinkSession s2 failed: %v", err)
+	// Set session
+	if err := wtr.SetSession(ctx, wt.ID, &s.ID); err != nil {
+		t.Fatalf("SetSession failed: %v", err)
 	}
 
-	ids, err := wtr.ListSessionIDs(ctx, wt.ID)
+	got, err := wtr.GetByPath(ctx, "/tmp/wt1")
 	if err != nil {
-		t.Fatalf("ListSessionIDs failed: %v", err)
+		t.Fatalf("GetByPath failed: %v", err)
 	}
-	if len(ids) != 2 {
-		t.Errorf("expected 2 session IDs, got %d", len(ids))
+	if got.SessionID == nil || *got.SessionID != s.ID {
+		t.Errorf("expected SessionID %q, got %v", s.ID, got.SessionID)
+	}
+
+	// Clear session
+	if err := wtr.SetSession(ctx, wt.ID, nil); err != nil {
+		t.Fatalf("SetSession(nil) failed: %v", err)
+	}
+
+	got, err = wtr.GetByPath(ctx, "/tmp/wt1")
+	if err != nil {
+		t.Fatalf("GetByPath after clear failed: %v", err)
+	}
+	if got.SessionID != nil {
+		t.Errorf("expected SessionID to be nil after clear, got %v", got.SessionID)
 	}
 }
 
-func TestWorktreeRepo_LinkSession_Idempotent(t *testing.T) {
+func TestWorktreeRepo_SessionID_RoundTrip(t *testing.T) {
 	repo := setupTestRepo(t)
 	wtr := NewWorktreeRepository(repo)
 	ctx := context.Background()
 
-	wt := makeWorktree("wt-1", "/tmp/wt1")
-	_ = wtr.Create(ctx, wt)
-	s := makeSession("s1")
+	// Create a session to satisfy the FK
+	s := makeSession("s-rt")
 	_ = repo.Create(ctx, s)
 
-	_ = wtr.LinkSession(ctx, wt.ID, s.ID)
-	if err := wtr.LinkSession(ctx, wt.ID, s.ID); err != nil {
-		t.Fatalf("duplicate LinkSession should be idempotent, got: %v", err)
+	// Create a worktree with non-nil SessionID
+	sessionID := s.ID
+	wt := domain.ManagedWorktree{
+		ID:        "wt-rt",
+		Path:      "/tmp/wt-rt",
+		Branch:    "feat",
+		RepoRoot:  "/repo",
+		SessionID: &sessionID,
+		CreatedAt: time.Now(),
+	}
+	if err := wtr.Create(ctx, wt); err != nil {
+		t.Fatalf("Create failed: %v", err)
 	}
 
-	ids, _ := wtr.ListSessionIDs(ctx, wt.ID)
-	if len(ids) != 1 {
-		t.Errorf("expected 1 session ID after idempotent link, got %d", len(ids))
+	got, err := wtr.Get(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
 	}
-}
-
-func TestWorktreeRepo_UnlinkSession(t *testing.T) {
-	repo := setupTestRepo(t)
-	wtr := NewWorktreeRepository(repo)
-	ctx := context.Background()
-
-	wt := makeWorktree("wt-1", "/tmp/wt1")
-	_ = wtr.Create(ctx, wt)
-	s := makeSession("s1")
-	_ = repo.Create(ctx, s)
-	_ = wtr.LinkSession(ctx, wt.ID, s.ID)
-
-	if err := wtr.UnlinkSession(ctx, s.ID); err != nil {
-		t.Fatalf("UnlinkSession failed: %v", err)
-	}
-
-	ids, _ := wtr.ListSessionIDs(ctx, wt.ID)
-	if len(ids) != 0 {
-		t.Errorf("expected 0 session IDs after unlink, got %d", len(ids))
-	}
-}
-
-func TestWorktreeRepo_Delete_CascadesJunction(t *testing.T) {
-	repo := setupTestRepo(t)
-	wtr := NewWorktreeRepository(repo)
-	ctx := context.Background()
-
-	wt := makeWorktree("wt-1", "/tmp/wt1")
-	_ = wtr.Create(ctx, wt)
-	s := makeSession("s1")
-	_ = repo.Create(ctx, s)
-	_ = wtr.LinkSession(ctx, wt.ID, s.ID)
-
-	_ = wtr.Delete(ctx, wt.ID)
-
-	// Junction rows should have cascaded
-	ids, _ := wtr.ListSessionIDs(ctx, wt.ID)
-	if len(ids) != 0 {
-		t.Errorf("expected junction rows to cascade-delete, got %d", len(ids))
+	if got.SessionID == nil || *got.SessionID != sessionID {
+		t.Errorf("expected SessionID %q, got %v", sessionID, got.SessionID)
 	}
 }

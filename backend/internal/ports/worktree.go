@@ -13,7 +13,5 @@ type WorktreeRepository interface {
 	GetByPath(ctx context.Context, path string) (domain.ManagedWorktree, error)
 	Delete(ctx context.Context, id string) error
 	DeleteByPath(ctx context.Context, path string) error
-	LinkSession(ctx context.Context, worktreeID, sessionID string) error
-	UnlinkSession(ctx context.Context, sessionID string) error
-	ListSessionIDs(ctx context.Context, worktreeID string) ([]string, error)
+	SetSession(ctx context.Context, worktreeID string, sessionID *string) error
 }

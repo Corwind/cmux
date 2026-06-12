@@ -39,14 +39,6 @@ func (w *WorktreeRepo) DeleteByPath(ctx context.Context, path string) error {
 	return w.r.DeleteWorktreeByPath(ctx, path)
 }
 
-func (w *WorktreeRepo) LinkSession(ctx context.Context, worktreeID, sessionID string) error {
-	return w.r.LinkWorktreeSession(ctx, worktreeID, sessionID)
-}
-
-func (w *WorktreeRepo) UnlinkSession(ctx context.Context, sessionID string) error {
-	return w.r.UnlinkWorktreeSession(ctx, sessionID)
-}
-
-func (w *WorktreeRepo) ListSessionIDs(ctx context.Context, worktreeID string) ([]string, error) {
-	return w.r.ListWorktreeSessionIDs(ctx, worktreeID)
+func (w *WorktreeRepo) SetSession(ctx context.Context, worktreeID string, sessionID *string) error {
+	return w.r.SetWorktreeSession(ctx, worktreeID, sessionID)
 }

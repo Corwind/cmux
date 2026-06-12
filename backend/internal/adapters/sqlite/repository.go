@@ -44,6 +44,12 @@ func NewRepository(dbPath string) (*Repository, error) {
 		return nil, fmt.Errorf("failed to create worktrees table: %w", err)
 	}
 
+	if _, err := db.Exec(addSessionIDToWorktrees); err != nil {
+		if !isDuplicateColumnError(err) {
+			return nil, fmt.Errorf("failed to add session_id column to worktrees: %w", err)
+		}
+	}
+
 	if _, err := db.Exec(createWorktreeSessionsTable); err != nil {
 		return nil, fmt.Errorf("failed to create worktree_sessions table: %w", err)
 	}
@@ -152,15 +158,15 @@ func (r *Repository) Close() error {
 
 func (r *Repository) CreateWorktree(ctx context.Context, wt domain.ManagedWorktree) error {
 	_, err := r.db.ExecContext(ctx,
-		"INSERT OR IGNORE INTO worktrees (id, path, branch, repo_root, created_at) VALUES (?, ?, ?, ?, ?)",
-		wt.ID, wt.Path, wt.Branch, wt.RepoRoot, wt.CreatedAt,
+		"INSERT OR IGNORE INTO worktrees (id, path, branch, repo_root, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+		wt.ID, wt.Path, wt.Branch, wt.RepoRoot, wt.SessionID, wt.CreatedAt,
 	)
 	return err
 }
 
 func (r *Repository) ListWorktrees(ctx context.Context) ([]domain.ManagedWorktree, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, path, branch, repo_root, created_at FROM worktrees ORDER BY created_at DESC",
+		"SELECT id, path, branch, repo_root, session_id, created_at FROM worktrees ORDER BY created_at DESC",
 	)
 	if err != nil {
 		return nil, err
@@ -170,7 +176,7 @@ func (r *Repository) ListWorktrees(ctx context.Context) ([]domain.ManagedWorktre
 	var wts []domain.ManagedWorktree
 	for rows.Next() {
 		var wt domain.ManagedWorktree
-		if err := rows.Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.CreatedAt); err != nil {
+		if err := rows.Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.SessionID, &wt.CreatedAt); err != nil {
 			return nil, err
 		}
 		wts = append(wts, wt)
@@ -181,8 +187,8 @@ func (r *Repository) ListWorktrees(ctx context.Context) ([]domain.ManagedWorktre
 func (r *Repository) GetWorktree(ctx context.Context, id string) (domain.ManagedWorktree, error) {
 	var wt domain.ManagedWorktree
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, path, branch, repo_root, created_at FROM worktrees WHERE id = ?", id,
-	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.CreatedAt)
+		"SELECT id, path, branch, repo_root, session_id, created_at FROM worktrees WHERE id = ?", id,
+	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.SessionID, &wt.CreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.ManagedWorktree{}, fmt.Errorf("worktree not found: %s", id)
 	}
@@ -192,8 +198,8 @@ func (r *Repository) GetWorktree(ctx context.Context, id string) (domain.Managed
 func (r *Repository) GetWorktreeByPath(ctx context.Context, path string) (domain.ManagedWorktree, error) {
 	var wt domain.ManagedWorktree
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, path, branch, repo_root, created_at FROM worktrees WHERE path = ?", path,
-	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.CreatedAt)
+		"SELECT id, path, branch, repo_root, session_id, created_at FROM worktrees WHERE path = ?", path,
+	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.SessionID, &wt.CreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.ManagedWorktree{}, fmt.Errorf("worktree not found: %s", path)
 	}
@@ -241,4 +247,9 @@ func (r *Repository) ListWorktreeSessionIDs(ctx context.Context, worktreeID stri
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+func (r *Repository) SetWorktreeSession(ctx context.Context, worktreeID string, sessionID *string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE worktrees SET session_id = ? WHERE id = ?", sessionID, worktreeID)
+	return err
 }

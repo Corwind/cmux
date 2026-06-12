@@ -18,37 +18,27 @@ func NewWorktreeHandler(service *app.SessionService) *worktreeHandler {
 	return &worktreeHandler{service: service}
 }
 
-type worktreeSessionResponse struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
-}
-
 type worktreeEntryResponse struct {
-	ID        string                    `json:"id"`
-	Path      string                    `json:"path"`
-	Branch    string                    `json:"branch"`
-	RepoRoot  string                    `json:"repo_root"`
-	CreatedAt time.Time                 `json:"created_at"`
-	Sessions  []worktreeSessionResponse `json:"sessions"`
+	ID            string    `json:"id"`
+	Path          string    `json:"path"`
+	Branch        string    `json:"branch"`
+	RepoRoot      string    `json:"repo_root"`
+	CreatedAt     time.Time `json:"created_at"`
+	SessionID     *string   `json:"session_id,omitempty"`
+	SessionName   *string   `json:"session_name,omitempty"`
+	SessionStatus *string   `json:"session_status,omitempty"`
 }
 
 func toWorktreeResponse(e domain.WorktreeEntry) worktreeEntryResponse {
-	sessions := make([]worktreeSessionResponse, 0, len(e.Sessions))
-	for _, s := range e.Sessions {
-		sessions = append(sessions, worktreeSessionResponse{
-			ID:     s.ID,
-			Name:   s.Name,
-			Status: string(s.Status),
-		})
-	}
 	return worktreeEntryResponse{
-		ID:        e.ID,
-		Path:      e.Path,
-		Branch:    e.Branch,
-		RepoRoot:  e.RepoRoot,
-		CreatedAt: e.CreatedAt,
-		Sessions:  sessions,
+		ID:            e.ID,
+		Path:          e.Path,
+		Branch:        e.Branch,
+		RepoRoot:      e.RepoRoot,
+		CreatedAt:     e.CreatedAt,
+		SessionID:     e.SessionID,
+		SessionName:   e.SessionName,
+		SessionStatus: e.SessionStatus,
 	}
 }
 
