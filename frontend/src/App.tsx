@@ -3,12 +3,10 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { router } from "@/router";
 import { queryClient } from "@/config/query-client";
 import { ToastContainer } from "@/components/ui/Toast";
-import { useSystemNotifications } from "@/features/sessions/hooks/useSystemNotifications";
 import { useNotificationWebSocket } from "@/features/sessions/hooks/useNotificationWebSocket";
 
 function NotificationManager() {
   useNotificationWebSocket();
-  useSystemNotifications();
   return null;
 }
 

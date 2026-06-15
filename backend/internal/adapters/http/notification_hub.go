@@ -3,8 +3,11 @@ package http
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
 // sessionNotificationMsg is the JSON payload broadcast to notification subscribers.
@@ -15,16 +18,45 @@ type sessionNotificationMsg struct {
 	EventType   string `json:"event_type"`
 }
 
+const notificationDebounce = 30 * time.Second
+
+// debounceKey identifies a (session, eventType) pair for rate-limiting.
+type debounceKey struct {
+	sessionID string
+	eventType string
+}
+
 // notificationHub fans out session notifications to all subscribed WebSocket clients.
 type notificationHub struct {
-	mu      sync.RWMutex
-	clients map[chan []byte]struct{}
+	mu           sync.RWMutex
+	clients      map[chan []byte]struct{}
+	debounceMu   sync.Mutex
+	lastNotified map[debounceKey]time.Time
 }
 
 func newNotificationHub() *notificationHub {
 	return &notificationHub{
-		clients: make(map[chan []byte]struct{}),
+		clients:      make(map[chan []byte]struct{}),
+		lastNotified: make(map[debounceKey]time.Time),
 	}
+}
+
+// shouldNotify returns true when the (session, eventType) pair hasn't fired
+// within the debounce window, and records the current time if so.
+// Only waiting_input and task_complete pass through; generic is always dropped.
+func (h *notificationHub) shouldNotify(sessionID, eventType string) bool {
+	if eventType != "waiting_input" && eventType != "task_complete" {
+		return false
+	}
+	key := debounceKey{sessionID, eventType}
+	now := time.Now()
+	h.debounceMu.Lock()
+	defer h.debounceMu.Unlock()
+	if last, ok := h.lastNotified[key]; ok && now.Sub(last) < notificationDebounce {
+		return false
+	}
+	h.lastNotified[key] = now
+	return true
 }
 
 // subscribe returns a channel that receives broadcast messages and a cleanup function.
@@ -41,8 +73,17 @@ func (h *notificationHub) subscribe() (<-chan []byte, func()) {
 	}
 }
 
-// broadcast sends a notification to all current subscribers, dropping slow ones.
+// broadcast sends a notification to all current subscribers, dropping slow ones,
+// and fires a native macOS notification so the system alert has no origin line.
+// Notifications are filtered to waiting_input and task_complete only, and
+// debounced per (session, eventType) to avoid spamming the user.
 func (h *notificationHub) broadcast(n sessionNotificationMsg) {
+	if !h.shouldNotify(n.SessionID, n.EventType) {
+		return
+	}
+
+	go notifyNative(n.SessionName, n.Message, n.EventType)
+
 	data, err := json.Marshal(n)
 	if err != nil {
 		return
@@ -55,6 +96,23 @@ func (h *notificationHub) broadcast(n sessionNotificationMsg) {
 		default:
 		}
 	}
+}
+
+// notifyNative fires a native macOS notification via osascript.
+// This avoids the "localhost:PORT" subtitle added by browsers to web notifications.
+func notifyNative(sessionName, message, eventType string) {
+	body := message
+	switch eventType {
+	case "waiting_input":
+		body = "Claude is waiting for your input"
+	case "task_complete":
+		body = "Task complete"
+	}
+	script := fmt.Sprintf(
+		`display notification %q with title "cmux" subtitle %q`,
+		body, sessionName,
+	)
+	_ = exec.Command("osascript", "-e", script).Run()
 }
 
 // parseOscNotification scans a PTY data chunk for notification sequences:

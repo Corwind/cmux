@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -123,8 +124,8 @@ func TestNotificationHub_BroadcastToMultipleSubscribers(t *testing.T) {
 	hub.broadcast(sessionNotificationMsg{
 		SessionID:   "s1",
 		SessionName: "Session 1",
-		Message:     "test",
-		EventType:   "generic",
+		Message:     "Claude needs your permission",
+		EventType:   "waiting_input",
 	})
 
 	select {
@@ -165,9 +166,12 @@ func TestNotificationHub_DropsSlowSubscribers(t *testing.T) {
 	ch, unsub := hub.subscribe()
 	defer unsub()
 
-	// Fill the buffer (capacity 16)
+	// Vary session IDs to bypass the per-session debounce.
 	for i := 0; i < 20; i++ {
-		hub.broadcast(sessionNotificationMsg{SessionID: "s1", EventType: "generic"})
+		hub.broadcast(sessionNotificationMsg{
+			SessionID: fmt.Sprintf("s%d", i),
+			EventType: "waiting_input",
+		})
 	}
 
 	// Should not block; slow subscriber just drops messages
@@ -183,6 +187,66 @@ func TestNotificationHub_DropsSlowSubscribers(t *testing.T) {
 			// No more buffered messages
 			if count == 0 {
 				t.Fatal("expected at least some messages to be received")
+			}
+			return
+		}
+	}
+}
+
+func TestNotificationHub_FilterDropsGeneric(t *testing.T) {
+	hub := newNotificationHub()
+	ch, unsub := hub.subscribe()
+	defer unsub()
+
+	hub.broadcast(sessionNotificationMsg{SessionID: "s1", EventType: "generic"})
+
+	select {
+	case <-ch:
+		t.Fatal("generic notification should be dropped")
+	default:
+	}
+}
+
+func TestNotificationHub_DebounceDeduplicates(t *testing.T) {
+	hub := newNotificationHub()
+	ch, unsub := hub.subscribe()
+	defer unsub()
+
+	// First broadcast fires.
+	hub.broadcast(sessionNotificationMsg{SessionID: "s1", EventType: "waiting_input"})
+	// Second broadcast within the debounce window is suppressed.
+	hub.broadcast(sessionNotificationMsg{SessionID: "s1", EventType: "waiting_input"})
+
+	count := 0
+	for {
+		select {
+		case <-ch:
+			count++
+		default:
+			if count != 1 {
+				t.Fatalf("expected exactly 1 notification, got %d", count)
+			}
+			return
+		}
+	}
+}
+
+func TestNotificationHub_DebounceDifferentTypesIndependent(t *testing.T) {
+	hub := newNotificationHub()
+	ch, unsub := hub.subscribe()
+	defer unsub()
+
+	hub.broadcast(sessionNotificationMsg{SessionID: "s1", EventType: "waiting_input"})
+	hub.broadcast(sessionNotificationMsg{SessionID: "s1", EventType: "task_complete"})
+
+	count := 0
+	for {
+		select {
+		case <-ch:
+			count++
+		default:
+			if count != 2 {
+				t.Fatalf("expected 2 notifications (different types), got %d", count)
 			}
 			return
 		}
