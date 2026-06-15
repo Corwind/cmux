@@ -4,8 +4,13 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { useQueryClient } from "@tanstack/react-query";
 import { getTerminalTheme } from "../themes";
 import { useTerminalThemeStore } from "../stores/terminal-theme.store";
+import { useNotificationStore } from "@/features/sessions/stores/notification.store";
+import { useSessionsStore } from "@/features/sessions/stores/sessions.store";
+import { sessionKeys } from "@/features/sessions";
+import type { Session, NotificationEventType } from "@/features/sessions";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalProps {
@@ -19,6 +24,8 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
   const cleanupRef = useRef<(() => void) | null>(null);
   const themeId = useTerminalThemeStore((s) => s.themeId);
   const fontFamily = useTerminalThemeStore((s) => s.fontFamily);
+  const queryClient = useQueryClient();
+  const activeSessionId = useSessionsStore((s) => s.activeSessionId);
 
   // Apply theme/font changes to a running terminal without remounting
   useEffect(() => {
@@ -33,6 +40,12 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       termRef.current.options.fontFamily = fontFamily;
     }
   }, [fontFamily]);
+
+  useEffect(() => {
+    if (activeSessionId === sessionId) {
+      useNotificationStore.getState().clearNotification(sessionId);
+    }
+  }, [activeSessionId, sessionId]);
 
   useEffect(() => {
     // Clean up previous instance immediately
@@ -166,6 +179,42 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         return false;
       });
 
+      function classifyOscMessage(msg: string): NotificationEventType {
+        const lower = msg.toLowerCase();
+        if (
+          lower.includes("waiting") || lower.includes("input") ||
+          lower.includes("attention") || lower.includes("permission") ||
+          lower.includes("approve")
+        ) {
+          return "waiting_input";
+        }
+        if (
+          lower.includes("done") || lower.includes("complete") ||
+          lower.includes("finished")
+        ) {
+          return "task_complete";
+        }
+        return "generic";
+      }
+
+      // OSC 9 — ConEmu / Ghostty / iTerm2 / Kitty notification
+      currentTerm.parser.registerOscHandler(9, (data) => {
+        const sessions = queryClient.getQueryData<Session[]>(sessionKeys.all) ?? [];
+        const sessionName = sessions.find((s) => s.id === sessionId)?.name ?? sessionId;
+        useNotificationStore.getState().notify(sessionId, sessionName, data, classifyOscMessage(data));
+        return false;
+      });
+
+      // OSC 777 — notify-osd / some Linux terminals
+      currentTerm.parser.registerOscHandler(777, (data) => {
+        const parts = data.split(";");
+        const message = parts.length >= 3 ? (parts[2] ?? data) : (parts[parts.length - 1] ?? data);
+        const sessions = queryClient.getQueryData<Session[]>(sessionKeys.all) ?? [];
+        const sessionName = sessions.find((s) => s.id === sessionId)?.name ?? sessionId;
+        useNotificationStore.getState().notify(sessionId, sessionName, message, classifyOscMessage(message));
+        return false;
+      });
+
       // Intercept Shift+Enter at the DOM level (capture phase) to fully prevent
       // xterm.js from also sending \r. Send kitty protocol escape sequence instead.
       const onKeyDown = (event: KeyboardEvent) => {
@@ -211,7 +260,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     cleanupRef.current = cleanup;
 
     return cleanup;
-  }, [sessionId, wsBaseUrl]);
+  }, [sessionId, wsBaseUrl, queryClient]);
 
   const bg = getTerminalTheme(themeId).theme.background;
 
