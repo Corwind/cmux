@@ -117,7 +117,9 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 		env = os.Environ()
 	}
 	env = filterEnv(env, "CLAUDECODE")
+	env = filterEnv(env, "TERM_PROGRAM")
 	env = append(env, "TERM=xterm-256color")
+	env = append(env, "TERM_PROGRAM=iTerm.app")
 	env = append(env, "LANG=en_US.UTF-8")
 
 	// Install a per-session `open` wrapper so sandboxed Claude can open URLs
