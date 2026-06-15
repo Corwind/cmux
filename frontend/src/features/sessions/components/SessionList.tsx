@@ -3,6 +3,7 @@ import { useDeleteSession } from "../hooks/useDeleteSession";
 import { useResumeSession } from "../hooks/useResumeSession";
 import { useRestartSession } from "../hooks/useRestartSession";
 import { useSessionsStore } from "../stores/sessions.store";
+import { useNotificationStore } from "../stores/notification.store";
 import { StatusBadge } from "./StatusBadge";
 import type { Session } from "../types";
 
@@ -28,6 +29,7 @@ export function SessionList() {
   const resumeSession = useResumeSession();
   const restartSession = useRestartSession();
   const { activeSessionId, setActiveSession } = useSessionsStore();
+  const notifications = useNotificationStore((s) => s.notifications);
 
   function handleDelete(session: Session) {
     deleteSessionMutation.mutate(session.id);
@@ -55,7 +57,10 @@ export function SessionList() {
         <li key={session.id}>
           <button
             type="button"
-            onClick={() => setActiveSession(session.id)}
+            onClick={() => {
+              setActiveSession(session.id);
+              useNotificationStore.getState().clearNotification(session.id);
+            }}
             className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors"
             style={{
               backgroundColor:
@@ -83,6 +88,23 @@ export function SessionList() {
           >
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 truncate font-medium">
+                {notifications[session.id] && (
+                  <span
+                    className={"inline-block shrink-0 rounded-full" + (notifications[session.id].eventType === "waiting_input" ? " animate-pulse" : "")}
+                    style={{
+                      width: 7,
+                      height: 7,
+                      backgroundColor:
+                        notifications[session.id].eventType === "waiting_input"
+                          ? "#eab308"
+                          : notifications[session.id].eventType === "task_complete"
+                          ? "#22c55e"
+                          : "var(--cmux-accent)",
+                    }}
+                    title={notifications[session.id].message}
+                    aria-label="notification"
+                  />
+                )}
                 {session.name}
                 {session.git_branch && <BranchBadge branch={session.git_branch} />}
               </div>
