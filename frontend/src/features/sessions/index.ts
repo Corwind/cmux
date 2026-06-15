@@ -9,3 +9,5 @@ export { useRestartSession } from "./hooks/useRestartSession";
 export { useWorktrees, useDeleteWorktree, worktreeKeys } from "./hooks/useWorktrees";
 export { useSessionsStore } from "./stores/sessions.store";
 export type { Session, CreateSessionInput, DirEntry, WorktreeEntry } from "./types";
+export { useNotificationStore } from "./stores/notification.store";
+export type { SessionNotification, NotificationEventType } from "./stores/notification.store";
