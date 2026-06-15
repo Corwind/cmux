@@ -98,13 +98,8 @@ func (h *notificationHub) broadcast(n sessionNotificationMsg) {
 	}
 }
 
-// notifyNative fires a native macOS notification.
-//
-// It prefers terminal-notifier (brew install terminal-notifier) which sends
-// proper Banner-style notifications without any action button.  When
-// terminal-notifier is not installed it falls back to osascript, which may
-// show a "Show" button if Script Editor is configured as "Alerts" in System
-// Settings → Notifications.
+// notifyNative fires a native macOS notification via osascript.
+// This avoids the "localhost:PORT" subtitle added by browsers to web notifications.
 func notifyNative(sessionName, message, eventType string) {
 	body := message
 	switch eventType {
@@ -113,16 +108,6 @@ func notifyNative(sessionName, message, eventType string) {
 	case "task_complete":
 		body = "Task complete"
 	}
-
-	if tn, err := exec.LookPath("terminal-notifier"); err == nil {
-		_ = exec.Command(tn,
-			"-title", "cmux",
-			"-subtitle", sessionName,
-			"-message", body,
-		).Run()
-		return
-	}
-
 	script := fmt.Sprintf(
 		`display notification %q with title "cmux" subtitle %q`,
 		body, sessionName,
