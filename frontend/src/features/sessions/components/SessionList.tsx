@@ -88,27 +88,6 @@ export function SessionList() {
           >
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 truncate font-medium">
-                {(() => {
-                  const notif = notifications[session.id];
-                  if (!notif || session.id === activeSessionId) return null;
-                  return (
-                    <span
-                      className={"inline-block shrink-0 rounded-full" + (notif.eventType === "waiting_input" ? " animate-pulse" : "")}
-                      style={{
-                        width: 7,
-                        height: 7,
-                        backgroundColor:
-                          notif.eventType === "waiting_input"
-                            ? "#eab308"
-                            : notif.eventType === "task_complete"
-                            ? "#22c55e"
-                            : "var(--cmux-accent)",
-                      }}
-                      title={notif.message}
-                      aria-label="notification"
-                    />
-                  );
-                })()}
                 {session.name}
                 {session.git_branch && <BranchBadge branch={session.git_branch} />}
               </div>
@@ -120,7 +99,7 @@ export function SessionList() {
               </div>
             </div>
             <div className="ml-2 flex items-center gap-2">
-              <StatusBadge status={session.status} />
+              <StatusBadge status={session.status} hasNotification={!!notifications[session.id]} />
               {session.status === "stopped" && (
                 <button
                   type="button"

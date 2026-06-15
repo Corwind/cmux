@@ -20,7 +20,7 @@ async function fireSystemNotification(n: SessionNotification): Promise<void> {
     await Notification.requestPermission();
   }
   if (Notification.permission === "granted") {
-    new Notification(n.sessionName, { body: getNotificationBody(n) });
+    new Notification("cmux", { body: `${n.sessionName}: ${getNotificationBody(n)}` });
   }
 }
 
