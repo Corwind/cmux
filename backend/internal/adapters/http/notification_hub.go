@@ -3,8 +3,6 @@ package http
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -73,16 +71,13 @@ func (h *notificationHub) subscribe() (<-chan []byte, func()) {
 	}
 }
 
-// broadcast sends a notification to all current subscribers, dropping slow ones,
-// and fires a native macOS notification so the system alert has no origin line.
-// Notifications are filtered to waiting_input and task_complete only, and
-// debounced per (session, eventType) to avoid spamming the user.
+// broadcast sends a notification to all current subscribers, dropping slow ones.
+// Notifications are filtered to waiting_input only and debounced per session
+// to avoid badge flicker from rapid OSC sequences.
 func (h *notificationHub) broadcast(n sessionNotificationMsg) {
 	if !h.shouldNotify(n.SessionID, n.EventType) {
 		return
 	}
-
-	go notifyNative(n.SessionName, n.Message, n.EventType)
 
 	data, err := json.Marshal(n)
 	if err != nil {
@@ -96,23 +91,6 @@ func (h *notificationHub) broadcast(n sessionNotificationMsg) {
 		default:
 		}
 	}
-}
-
-// notifyNative fires a native macOS notification via osascript.
-// This avoids the "localhost:PORT" subtitle added by browsers to web notifications.
-func notifyNative(sessionName, message, eventType string) {
-	body := message
-	switch eventType {
-	case "waiting_input":
-		body = "Claude is waiting for your input"
-	case "task_complete":
-		body = "Task complete"
-	}
-	script := fmt.Sprintf(
-		`display notification %q with title "cmux" subtitle %q`,
-		body, sessionName,
-	)
-	_ = exec.Command("osascript", "-e", script).Run()
 }
 
 // parseOscNotification scans a PTY data chunk for notification sequences:
