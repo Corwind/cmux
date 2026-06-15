@@ -212,9 +212,15 @@ func TestWithEnvSpawnUsesBaseEnv(t *testing.T) {
 	if !contains(output, "CMUX_TEST_VAR=hello") {
 		t.Fatalf("expected CMUX_TEST_VAR=hello in output, got: %s", output)
 	}
-	// TERM and LANG should always be appended
-	if !contains(output, "TERM=xterm-256color") {
-		t.Fatalf("expected TERM=xterm-256color in output, got: %s", output)
+	// Ghostty notification env vars are always injected
+	if !contains(output, "TERM=xterm-ghostty") {
+		t.Fatalf("expected TERM=xterm-ghostty in output, got: %s", output)
+	}
+	if !contains(output, "TERM_PROGRAM=ghostty") {
+		t.Fatalf("expected TERM_PROGRAM=ghostty in output, got: %s", output)
+	}
+	if !contains(output, "GHOSTTY_RESOURCES_DIR=") {
+		t.Fatalf("expected GHOSTTY_RESOURCES_DIR in output, got: %s", output)
 	}
 }
 

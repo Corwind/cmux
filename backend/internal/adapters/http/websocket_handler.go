@@ -36,6 +36,7 @@ func (b *ptyBridge) getConn() *websocket.Conn {
 
 type WebSocketHandler struct {
 	service        *app.SessionService
+	hub            *notificationHub
 	mu             sync.Mutex
 	bridges        map[string]*ptyBridge
 	originPatterns []string
@@ -52,6 +53,7 @@ func WithOriginPatterns(patterns []string) WebSocketOption {
 func NewWebSocketHandler(service *app.SessionService, opts ...WebSocketOption) *WebSocketHandler {
 	h := &WebSocketHandler{
 		service:        service,
+		hub:            newNotificationHub(),
 		bridges:        make(map[string]*ptyBridge),
 		originPatterns: []string{"*"},
 	}
@@ -79,7 +81,10 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 	bridge = &ptyBridge{}
 	h.bridges[sessionID] = bridge
 
-	// Start a single PTY reader goroutine for this session
+	// Start a single PTY reader goroutine for this session.
+	// This goroutine runs for the entire lifetime of the session regardless of
+	// whether a WebSocket client is currently connected, so notification detection
+	// works for background sessions too.
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -98,9 +103,23 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 				return
 			}
 
+			data := make([]byte, n)
+			copy(data, buf[:n])
+
+			if msg, eventType, ok := parseOscNotification(data); ok {
+				name := sessionID
+				if session, sErr := h.service.GetSession(context.Background(), sessionID); sErr == nil {
+					name = session.Name
+				}
+				h.hub.broadcast(sessionNotificationMsg{
+					SessionID:   sessionID,
+					SessionName: name,
+					Message:     msg,
+					EventType:   eventType,
+				})
+			}
+
 			if conn := bridge.getConn(); conn != nil {
-				data := make([]byte, n)
-				copy(data, buf[:n])
 				if err := conn.Write(context.Background(), websocket.MessageBinary, data); err != nil {
 					log.Printf("websocket write error: %v", err)
 				}
@@ -175,6 +194,38 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 				} else {
 					_ = h.service.ResizePTY(session.PID, msg.Rows, msg.Cols)
 				}
+			}
+		}
+	}
+}
+
+// HandleNotifications streams session notification events to a WebSocket client.
+// A single global connection per browser tab is enough; the hub fans out to all subscribers.
+func (h *WebSocketHandler) HandleNotifications(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns:  h.originPatterns,
+		CompressionMode: websocket.CompressionDisabled,
+	})
+	if err != nil {
+		log.Printf("notification websocket accept error: %v", err)
+		return
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	ch, unsub := h.hub.subscribe()
+	defer unsub()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
+				return
 			}
 		}
 	}

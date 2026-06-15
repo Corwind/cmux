@@ -119,9 +119,11 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	env = filterEnv(env, "CLAUDECODE")
 	env = filterEnv(env, "TERM_PROGRAM")
 	env = filterEnv(env, "TERM_PROGRAM_VERSION")
+	env = filterEnv(env, "GHOSTTY_RESOURCES_DIR")
 	env = append(env, "TERM=xterm-ghostty")
 	env = append(env, "TERM_PROGRAM=ghostty")
 	env = append(env, "TERM_PROGRAM_VERSION=1.0.0")
+	env = append(env, "GHOSTTY_RESOURCES_DIR=/Applications/Ghostty.app/Contents/Resources")
 	env = append(env, "LANG=en_US.UTF-8")
 
 	// Install a per-session `open` wrapper so sandboxed Claude can open URLs

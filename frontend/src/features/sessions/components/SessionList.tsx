@@ -90,7 +90,7 @@ export function SessionList() {
               <div className="flex items-center gap-1.5 truncate font-medium">
                 {(() => {
                   const notif = notifications[session.id];
-                  if (!notif) return null;
+                  if (!notif || session.id === activeSessionId) return null;
                   return (
                     <span
                       className={"inline-block shrink-0 rounded-full" + (notif.eventType === "waiting_input" ? " animate-pulse" : "")}
