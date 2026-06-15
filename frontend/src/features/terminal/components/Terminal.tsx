@@ -217,6 +217,13 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         return false;
       });
 
+      // BEL (\x07) — fired when Claude Code has preferredNotifChannel: "terminal_bell"
+      currentTerm.onBell(() => {
+        const sessions = queryClient.getQueryData<Session[]>(sessionKeys.all) ?? [];
+        const sessionName = sessions.find((s) => s.id === sessionId)?.name ?? sessionId;
+        useNotificationStore.getState().notify(sessionId, sessionName, "Claude needs your attention", "waiting_input");
+      });
+
       // Intercept Shift+Enter at the DOM level (capture phase) to fully prevent
       // xterm.js from also sending \r. Send kitty protocol escape sequence instead.
       const onKeyDown = (event: KeyboardEvent) => {
