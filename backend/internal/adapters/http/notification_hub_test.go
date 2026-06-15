@@ -207,6 +207,20 @@ func TestNotificationHub_FilterDropsGeneric(t *testing.T) {
 	}
 }
 
+func TestNotificationHub_FilterDropsTaskComplete(t *testing.T) {
+	hub := newNotificationHub()
+	ch, unsub := hub.subscribe()
+	defer unsub()
+
+	hub.broadcast(sessionNotificationMsg{SessionID: "s1", EventType: "task_complete"})
+
+	select {
+	case <-ch:
+		t.Fatal("task_complete notification should be dropped")
+	default:
+	}
+}
+
 func TestNotificationHub_DebounceDeduplicates(t *testing.T) {
 	hub := newNotificationHub()
 	ch, unsub := hub.subscribe()
@@ -225,28 +239,6 @@ func TestNotificationHub_DebounceDeduplicates(t *testing.T) {
 		default:
 			if count != 1 {
 				t.Fatalf("expected exactly 1 notification, got %d", count)
-			}
-			return
-		}
-	}
-}
-
-func TestNotificationHub_DebounceDifferentTypesIndependent(t *testing.T) {
-	hub := newNotificationHub()
-	ch, unsub := hub.subscribe()
-	defer unsub()
-
-	hub.broadcast(sessionNotificationMsg{SessionID: "s1", EventType: "waiting_input"})
-	hub.broadcast(sessionNotificationMsg{SessionID: "s1", EventType: "task_complete"})
-
-	count := 0
-	for {
-		select {
-		case <-ch:
-			count++
-		default:
-			if count != 2 {
-				t.Fatalf("expected 2 notifications (different types), got %d", count)
 			}
 			return
 		}

@@ -45,7 +45,7 @@ func newNotificationHub() *notificationHub {
 // within the debounce window, and records the current time if so.
 // Only waiting_input and task_complete pass through; generic is always dropped.
 func (h *notificationHub) shouldNotify(sessionID, eventType string) bool {
-	if eventType != "waiting_input" && eventType != "task_complete" {
+	if eventType != "waiting_input" {
 		return false
 	}
 	key := debounceKey{sessionID, eventType}
