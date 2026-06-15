@@ -99,7 +99,7 @@ export function SessionList() {
               </div>
             </div>
             <div className="ml-2 flex items-center gap-2">
-              <StatusBadge status={session.status} hasNotification={!!notifications[session.id]} />
+              <StatusBadge status={session.status} hasNotification={notifications[session.id]?.eventType === "waiting_input"} />
               {session.status === "stopped" && (
                 <button
                   type="button"
