@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useSessionsStore } from "../stores/sessions.store";
 import { useNotificationStore } from "../stores/notification.store";
+import { useSessionsStore } from "../stores/sessions.store";
 import type { SessionNotification } from "../stores/notification.store";
 
 function getNotificationBody(n: SessionNotification): string {
@@ -25,10 +25,9 @@ async function fireSystemNotification(n: SessionNotification): Promise<void> {
 }
 
 export function useSystemNotifications(): void {
-  const activeSessionId = useSessionsStore((s) => s.activeSessionId);
-
   useEffect(() => {
     return useNotificationStore.subscribe((state, prevState) => {
+      const activeSessionId = useSessionsStore.getState().activeSessionId;
       for (const [sessionId, notification] of Object.entries(state.notifications)) {
         const prev = prevState.notifications[sessionId];
         if (!prev || prev.timestamp !== notification.timestamp) {
@@ -40,5 +39,5 @@ export function useSystemNotifications(): void {
         }
       }
     });
-  }, [activeSessionId]);
+  }, []);
 }

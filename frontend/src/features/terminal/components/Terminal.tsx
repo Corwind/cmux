@@ -56,6 +56,8 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
 
     let term: XTerm | null = null;
     let ws: WebSocket | null = null;
+    let oscHandler9: { dispose(): void } | null = null;
+    let oscHandler777: { dispose(): void } | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let reconnectTimer: ReturnType<typeof setTimeout>;
@@ -198,7 +200,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       }
 
       // OSC 9 — ConEmu / Ghostty / iTerm2 / Kitty notification
-      currentTerm.parser.registerOscHandler(9, (data) => {
+      oscHandler9 = currentTerm.parser.registerOscHandler(9, (data) => {
         const sessions = queryClient.getQueryData<Session[]>(sessionKeys.all) ?? [];
         const sessionName = sessions.find((s) => s.id === sessionId)?.name ?? sessionId;
         useNotificationStore.getState().notify(sessionId, sessionName, data, classifyOscMessage(data));
@@ -206,7 +208,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       });
 
       // OSC 777 — notify-osd / some Linux terminals
-      currentTerm.parser.registerOscHandler(777, (data) => {
+      oscHandler777 = currentTerm.parser.registerOscHandler(777, (data) => {
         const parts = data.split(";");
         const message = parts.length >= 3 ? (parts[2] ?? data) : (parts[parts.length - 1] ?? data);
         const sessions = queryClient.getQueryData<Session[]>(sessionKeys.all) ?? [];
@@ -248,6 +250,8 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       if (ws && ws.readyState <= WebSocket.OPEN) {
         ws.close();
       }
+      oscHandler9?.dispose();
+      oscHandler777?.dispose();
       term?.dispose();
       termRef.current = null;
       term = null;
