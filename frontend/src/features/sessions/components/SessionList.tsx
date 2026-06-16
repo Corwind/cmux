@@ -3,6 +3,7 @@ import { useDeleteSession } from "../hooks/useDeleteSession";
 import { useResumeSession } from "../hooks/useResumeSession";
 import { useRestartSession } from "../hooks/useRestartSession";
 import { useSessionsStore } from "../stores/sessions.store";
+import { useNotificationStore } from "../stores/notification.store";
 import { StatusBadge } from "./StatusBadge";
 import type { Session } from "../types";
 
@@ -28,6 +29,7 @@ export function SessionList() {
   const resumeSession = useResumeSession();
   const restartSession = useRestartSession();
   const { activeSessionId, setActiveSession } = useSessionsStore();
+  const notifications = useNotificationStore((s) => s.notifications);
 
   function handleDelete(session: Session) {
     deleteSessionMutation.mutate(session.id);
@@ -55,7 +57,10 @@ export function SessionList() {
         <li key={session.id}>
           <button
             type="button"
-            onClick={() => setActiveSession(session.id)}
+            onClick={() => {
+              setActiveSession(session.id);
+              useNotificationStore.getState().clearNotification(session.id);
+            }}
             className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors"
             style={{
               backgroundColor:
@@ -94,7 +99,7 @@ export function SessionList() {
               </div>
             </div>
             <div className="ml-2 flex items-center gap-2">
-              <StatusBadge status={session.status} />
+              <StatusBadge status={session.status} hasNotification={notifications[session.id]?.eventType === "waiting_input"} />
               {session.status === "stopped" && (
                 <button
                   type="button"

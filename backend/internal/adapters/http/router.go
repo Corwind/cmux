@@ -60,6 +60,7 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 	})
 
 	r.Get("/ws/sessions/{id}", wsHandler.Handle)
+	r.Get("/ws/notifications", wsHandler.HandleNotifications)
 
 	// Serve embedded frontend (SPA with index.html fallback)
 	mountSPA(r)
@@ -139,6 +140,7 @@ func NewTestRouter(sessionService *app.SessionService, templateService *app.Temp
 	})
 
 	r.Get("/ws/sessions/{id}", wsHandler.Handle)
+	r.Get("/ws/notifications", wsHandler.HandleNotifications)
 
 	return r
 }

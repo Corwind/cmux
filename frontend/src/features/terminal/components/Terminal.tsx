@@ -6,6 +6,8 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { getTerminalTheme } from "../themes";
 import { useTerminalThemeStore } from "../stores/terminal-theme.store";
+import { useNotificationStore } from "@/features/sessions/stores/notification.store";
+import { useSessionsStore } from "@/features/sessions/stores/sessions.store";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalProps {
@@ -19,6 +21,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
   const cleanupRef = useRef<(() => void) | null>(null);
   const themeId = useTerminalThemeStore((s) => s.themeId);
   const fontFamily = useTerminalThemeStore((s) => s.fontFamily);
+  const activeSessionId = useSessionsStore((s) => s.activeSessionId);
 
   // Apply theme/font changes to a running terminal without remounting
   useEffect(() => {
@@ -33,6 +36,12 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       termRef.current.options.fontFamily = fontFamily;
     }
   }, [fontFamily]);
+
+  useEffect(() => {
+    if (activeSessionId === sessionId) {
+      useNotificationStore.getState().clearNotification(sessionId);
+    }
+  }, [activeSessionId, sessionId]);
 
   useEffect(() => {
     // Clean up previous instance immediately
@@ -75,7 +84,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
             if (alive && currentTerm) currentTerm.write(new Uint8Array(buf));
           });
         } else {
-          currentTerm.write(event.data);
+          currentTerm.write(event.data as string);
         }
       };
 
