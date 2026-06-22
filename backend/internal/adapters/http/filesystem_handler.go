@@ -2,7 +2,7 @@ package http
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/Corwind/cmux/backend/internal/ports"
@@ -57,6 +57,6 @@ func (h *FilesystemHandler) ListDirectory(w http.ResponseWriter, r *http.Request
 		Path:    path,
 		Entries: resp,
 	}); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }

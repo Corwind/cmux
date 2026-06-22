@@ -2,7 +2,7 @@ package http
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/Corwind/cmux/backend/internal/app"
@@ -98,7 +98,7 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(toSessionResponse(session)); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 
@@ -116,7 +116,7 @@ func (h *SessionHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 
@@ -130,7 +130,7 @@ func (h *SessionHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(toSessionResponse(session)); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 
@@ -144,7 +144,7 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(toSessionResponse(session)); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 
@@ -158,7 +158,7 @@ func (h *SessionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(toSessionResponse(session)); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 

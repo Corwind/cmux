@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,14 +22,18 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
 	cfg, err := configadapter.Load()
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		slog.Error("failed to load config", "err", err)
+		os.Exit(1)
 	}
 
 	repo, err := sqlite.NewRepository(cfg.Server.DBPath)
 	if err != nil {
-		log.Fatalf("failed to initialize database: %v", err)
+		slog.Error("failed to initialize database", "err", err)
+		os.Exit(1)
 	}
 
 	templateRepo := sqlite.NewTemplateRepository(repo.DB())
@@ -39,7 +43,7 @@ func main() {
 	seedTemplates(templateService, cfg.Sandbox.TemplateDir)
 
 	builder := sandbox.NewProfileBuilder(cfg.Sandbox.TemplateDir)
-	log.Printf("resolving shell environment...")
+	slog.Info("resolving shell environment")
 	envCache := configadapter.NewEnvCache(func() []string {
 		return configadapter.ResolveShellEnv(cfg)
 	}, 5*time.Minute)
@@ -48,7 +52,7 @@ func main() {
 	if len(cfg.Sandbox.Templates) > 0 {
 		managerOpts = append(managerOpts, pty.WithSandboxTemplates(cfg.Sandbox.Templates...))
 	}
-	log.Printf("sandbox enabled (template dir: %s)", cfg.Sandbox.TemplateDir)
+	slog.Info("sandbox enabled", "template_dir", cfg.Sandbox.TemplateDir)
 
 	processManager := pty.NewManager(managerOpts...)
 	fileBrowser := filesystem.NewBrowser()
@@ -72,14 +76,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 
 	go func() {
-		log.Printf("cmux server starting on %s", addr)
+		slog.Info("cmux server starting", "addr", addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
+			slog.Error("server error", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-quit
-	log.Printf("shutting down...")
+	slog.Info("shutting down")
 
 	// Stop accepting new connections, wait up to 5s for in-flight requests
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -92,14 +97,14 @@ func main() {
 	// Close database
 	_ = repo.Close()
 
-	log.Printf("cmux stopped")
+	slog.Info("cmux stopped")
 }
 
 func seedTemplates(svc *appservice.TemplateService, profileDir string) {
 	ctx := context.Background()
 	templates, err := svc.ListTemplates(ctx)
 	if err != nil {
-		log.Printf("failed to list templates for seeding: %v", err)
+		slog.Error("failed to list templates for seeding", "err", err)
 		return
 	}
 	if len(templates) > 0 {
@@ -108,7 +113,7 @@ func seedTemplates(svc *appservice.TemplateService, profileDir string) {
 
 	entries, err := os.ReadDir(profileDir)
 	if err != nil {
-		log.Printf("no sandbox-profiles directory found, skipping template seeding")
+		slog.Info("no sandbox-profiles directory found, skipping template seeding")
 		return
 	}
 
@@ -119,18 +124,18 @@ func seedTemplates(svc *appservice.TemplateService, profileDir string) {
 		}
 		data, err := os.ReadFile(fmt.Sprintf("%s/%s", profileDir, entry.Name()))
 		if err != nil {
-			log.Printf("failed to read %s: %v", entry.Name(), err)
+			slog.Error("failed to read template file", "file", entry.Name(), "err", err)
 			continue
 		}
 		content := string(data)
 		name := strings.TrimSuffix(entry.Name(), ".sbpl")
 
 		if _, err := svc.CreateTemplate(ctx, name, content); err != nil {
-			log.Printf("failed to seed template %s: %v", name, err)
+			slog.Error("failed to seed template", "name", name, "err", err)
 			continue
 		}
 		allContent = append(allContent, content)
-		log.Printf("seeded template: %s", name)
+		slog.Info("seeded template", "name", name)
 	}
 
 	// Create a combined "Standard" template and set as default
@@ -138,13 +143,13 @@ func seedTemplates(svc *appservice.TemplateService, profileDir string) {
 		combined := strings.Join(allContent, "\n\n")
 		tmpl, err := svc.CreateTemplate(ctx, "Standard", combined)
 		if err != nil {
-			log.Printf("failed to create Standard template: %v", err)
+			slog.Error("failed to create Standard template", "err", err)
 			return
 		}
 		if err := svc.SetDefault(ctx, tmpl.ID); err != nil {
-			log.Printf("failed to set Standard as default: %v", err)
+			slog.Error("failed to set Standard as default", "err", err)
 		} else {
-			log.Printf("set Standard template as default")
+			slog.Info("set Standard template as default")
 		}
 	}
 }

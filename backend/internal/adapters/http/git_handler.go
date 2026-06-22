@@ -2,7 +2,7 @@ package http
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/Corwind/cmux/backend/internal/ports"
@@ -77,6 +77,6 @@ func (h *GitHandler) Info(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("failed to encode git info response: %v", err)
+		slog.Error("failed to encode git info response", "err", err)
 	}
 }
