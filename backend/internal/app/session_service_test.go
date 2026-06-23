@@ -158,6 +158,20 @@ func (m *mockProcessManager) killPIDsSafe() []int {
 	return result
 }
 
+// nextPIDSafe returns nextPID safely.
+func (m *mockProcessManager) nextPIDSafe() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.nextPID
+}
+
+// getDoneChan returns the done channel for the given PID safely.
+func (m *mockProcessManager) getDoneChan(pid int) chan error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.doneChans[pid]
+}
+
 // --- Mock ProcessManager with SandboxContentProvider ---
 
 type mockSandboxProcessManager struct {
@@ -228,6 +242,24 @@ func (m *mockGitService) IsClean(ctx context.Context, path string) (bool, error)
 		return m.isCleanFn(ctx, path)
 	}
 	return true, nil
+}
+
+// removedWorktreesSafe returns a safe copy of removedWorktrees.
+func (m *mockGitService) removedWorktreesSafe() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]string, len(m.removedWorktrees))
+	copy(result, m.removedWorktrees)
+	return result
+}
+
+// forceFlagsSafe returns a safe copy of forceFlags.
+func (m *mockGitService) forceFlagsSafe() []bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]bool, len(m.forceFlags))
+	copy(result, m.forceFlags)
+	return result
 }
 
 // --- Helper ---
@@ -798,7 +830,7 @@ func TestWatchProcess_IgnoresStaleWatcher(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	oldPID := session.PID
-	oldDone := pm.doneChans[oldPID]
+	oldDone := pm.getDoneChan(oldPID)
 
 	// Restart — kills old PID, spawns new PID (43)
 	restarted, err := svc.RestartSession(context.Background(), session.ID)
@@ -977,7 +1009,7 @@ func TestDeleteSession_DoesNotRemoveWorktree(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Worktree directory should NOT be removed by DeleteSession
-	if len(git.removedWorktrees) != 0 {
+	if len(git.removedWorktreesSafe()) != 0 {
 		t.Error("expected worktree to NOT be removed by DeleteSession")
 	}
 }
@@ -1191,7 +1223,7 @@ func TestProvisionWorktree_AddWorktreeFails_UpdatesSessionToFailed(t *testing.T)
 		t.Errorf("expected error to mention git conflict, got %q", stored.Error)
 	}
 	// No process should have been spawned
-	if len(pm.killPIDs) != 0 || pm.nextPID != 42 {
+	if len(pm.killPIDsSafe()) != 0 || pm.nextPIDSafe() != 42 {
 		t.Error("expected no process to be spawned when AddWorktree fails")
 	}
 }
@@ -1238,10 +1270,10 @@ func TestProvisionWorktree_SpawnFails_UpdatesSessionToFailedAndCleansWorktree(t 
 	}
 
 	// Worktree must have been cleaned up (force removed)
-	if len(git.removedWorktrees) == 0 {
+	if len(git.removedWorktreesSafe()) == 0 {
 		t.Error("expected orphaned worktree to be cleaned up on spawn failure")
 	}
-	if !git.forceFlags[0] {
+	if !git.forceFlagsSafe()[0] {
 		t.Error("expected force=true when cleaning up orphaned worktree")
 	}
 }
