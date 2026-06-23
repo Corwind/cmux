@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	appservice "github.com/Corwind/cmux/backend/internal/app"
 	configadapter "github.com/Corwind/cmux/backend/internal/adapters/config"
 	"github.com/Corwind/cmux/backend/internal/adapters/filesystem"
 	gitadapter "github.com/Corwind/cmux/backend/internal/adapters/git"
@@ -19,6 +18,7 @@ import (
 	"github.com/Corwind/cmux/backend/internal/adapters/pty"
 	"github.com/Corwind/cmux/backend/internal/adapters/pty/sandbox"
 	"github.com/Corwind/cmux/backend/internal/adapters/sqlite"
+	appservice "github.com/Corwind/cmux/backend/internal/app"
 )
 
 func main() {
@@ -58,12 +58,19 @@ func main() {
 	fileBrowser := filesystem.NewBrowser()
 	gitService := gitadapter.NewService()
 	worktreeRepo := sqlite.NewWorktreeRepository(repo)
+
+	// Break circular dependency: wsHandler needs the hub created first, then the
+	// hub is wired into sessionService as a broadcaster, and finally sessionService
+	// is injected back into wsHandler via SetService.
+	wsHandler := httpadapter.NewWebSocketHandler(nil, httpadapter.WithOriginPatterns([]string{"*"}))
 	sessionService := appservice.NewSessionService(repo, processManager, templateRepo,
 		appservice.WithGitService(gitService, cfg.Git.WorktreesDir),
 		appservice.WithWorktreeRepository(worktreeRepo),
+		appservice.WithBroadcaster(wsHandler.Hub()),
 	)
+	wsHandler.SetService(sessionService)
 
-	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, gitService, cfg.Server.Port)
+	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, gitService, cfg.Server.Port, wsHandler)
 
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	server := &http.Server{

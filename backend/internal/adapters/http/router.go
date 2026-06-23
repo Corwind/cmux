@@ -13,7 +13,10 @@ import (
 	"github.com/go-chi/cors"
 )
 
-func NewRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, gitService ports.GitService, port string) http.Handler {
+// NewRouter builds the main HTTP router. wsHandler must already be fully wired
+// (service set, hub injected) before being passed in; this avoids the circular
+// dependency between hub initialisation and SessionService construction.
+func NewRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, gitService ports.GitService, port string, wsHandler *WebSocketHandler) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -28,7 +31,6 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 	sessionHandler := NewSessionHandler(sessionService)
 	templateHandler := NewTemplateHandler(templateService)
 	fsHandler := NewFilesystemHandler(fileBrowser)
-	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}))
 	openHandler := NewOpenHandler()
 	gitHandler := NewGitHandler(gitService)
 	worktreeHandler := NewWorktreeHandler(sessionService)
@@ -95,6 +97,7 @@ func mountSPA(r chi.Router) {
 }
 
 // NewTestRouter creates a router with permissive WebSocket origin patterns for testing.
+// If wsHandler is nil a default one is constructed from sessionService.
 func NewTestRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, gitService ports.GitService) http.Handler {
 	r := chi.NewRouter()
 

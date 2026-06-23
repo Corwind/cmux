@@ -53,3 +53,53 @@ func TestNewSession_UniqueIDs(t *testing.T) {
 		t.Error("expected unique IDs for different sessions")
 	}
 }
+
+func TestSessionStatus_ProvisioningConstant(t *testing.T) {
+	if StatusProvisioning != SessionStatus("provisioning") {
+		t.Errorf("expected StatusProvisioning to be 'provisioning', got %q", StatusProvisioning)
+	}
+}
+
+func TestSessionStatus_FailedConstant(t *testing.T) {
+	if StatusFailed != SessionStatus("failed") {
+		t.Errorf("expected StatusFailed to be 'failed', got %q", StatusFailed)
+	}
+}
+
+func TestSession_ErrorFieldDefaultsEmpty(t *testing.T) {
+	s, err := NewSession("test", "/tmp")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Error != "" {
+		t.Errorf("expected empty Error field, got %q", s.Error)
+	}
+}
+
+func TestSession_ErrorFieldCanBeSet(t *testing.T) {
+	s, _ := NewSession("test", "/tmp")
+	s.Error = "worktree creation failed: git error"
+	if s.Error != "worktree creation failed: git error" {
+		t.Errorf("expected error message to be set, got %q", s.Error)
+	}
+}
+
+func TestSession_ProvisioningStatus(t *testing.T) {
+	s, _ := NewSession("test", "/tmp")
+	s.Status = StatusProvisioning
+	if s.Status != StatusProvisioning {
+		t.Errorf("expected status %q, got %q", StatusProvisioning, s.Status)
+	}
+}
+
+func TestSession_FailedStatusWithError(t *testing.T) {
+	s, _ := NewSession("test", "/tmp")
+	s.Status = StatusFailed
+	s.Error = "something went wrong"
+	if s.Status != StatusFailed {
+		t.Errorf("expected status %q, got %q", StatusFailed, s.Status)
+	}
+	if s.Error != "something went wrong" {
+		t.Errorf("expected error 'something went wrong', got %q", s.Error)
+	}
+}

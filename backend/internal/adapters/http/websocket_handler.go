@@ -63,6 +63,17 @@ func NewWebSocketHandler(service *app.SessionService, opts ...WebSocketOption) *
 	return h
 }
 
+// SetService wires the SessionService into an already-constructed handler.
+// This is used in main.go to break the circular dependency between hub
+// initialisation and SessionService construction:
+//
+//  1. Construct WebSocketHandler (service=nil) — hub is ready.
+//  2. Construct SessionService with hub as broadcaster.
+//  3. Call SetService to give the handler its service.
+func (h *WebSocketHandler) SetService(svc *app.SessionService) {
+	h.service = svc
+}
+
 type resizeMessage struct {
 	Type string `json:"type"`
 	Rows uint16 `json:"rows"`
@@ -198,6 +209,10 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// Hub returns the underlying notification hub as an app.SessionEventBroadcaster so
+// it can be injected into SessionService via app.WithBroadcaster.
+func (h *WebSocketHandler) Hub() app.SessionEventBroadcaster { return h.hub }
 
 // HandleNotifications streams session notification events to a WebSocket client.
 // A single global connection per browser tab is enough; the hub fans out to all subscribers.

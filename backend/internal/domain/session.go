@@ -11,8 +11,10 @@ import (
 type SessionStatus string
 
 const (
-	StatusRunning SessionStatus = "running"
-	StatusStopped SessionStatus = "stopped"
+	StatusRunning      SessionStatus = "running"
+	StatusStopped      SessionStatus = "stopped"
+	StatusProvisioning SessionStatus = "provisioning"
+	StatusFailed       SessionStatus = "failed"
 )
 
 type Session struct {
@@ -27,6 +29,7 @@ type Session struct {
 	RepoRoot        string
 	GitBranch       string
 	WorktreeManaged bool
+	Error           string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

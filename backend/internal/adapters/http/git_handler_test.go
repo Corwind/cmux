@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,15 +22,15 @@ func (m *mockGitService) Info(path string) (ports.GitInfo, error) {
 	return ports.GitInfo{IsRepo: false}, nil
 }
 
-func (m *mockGitService) AddWorktree(repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+func (m *mockGitService) AddWorktree(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
 	return ports.Worktree{}, nil
 }
 
-func (m *mockGitService) RemoveWorktree(repoRoot, wtPath string, force bool) error {
+func (m *mockGitService) RemoveWorktree(ctx context.Context, repoRoot, wtPath string, force bool) error {
 	return nil
 }
 
-func (m *mockGitService) IsClean(path string) (bool, error) {
+func (m *mockGitService) IsClean(ctx context.Context, path string) (bool, error) {
 	return true, nil
 }
 
