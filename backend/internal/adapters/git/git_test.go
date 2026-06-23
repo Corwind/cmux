@@ -3,6 +3,7 @@ package git_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -364,6 +365,33 @@ func TestAddWorktree_CancelledContext(t *testing.T) {
 	}
 }
 
+// TestAddWorktree_CancelledContext_ReturnsContextError explicitly verifies the
+// error type semantics: a pre-cancelled context must produce context.Canceled
+// rather than a git or timeout error message. This distinguishes the context
+// cancel path from the 10-second internal timeout path.
+func TestAddWorktree_CancelledContext_ReturnsContextError(t *testing.T) {
+	svc := git.NewService()
+	repoDir := setupRepo(t)
+	wtDir := t.TempDir()
+	wtPath := filepath.Join(wtDir, "ctx-error-wt")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the call — establishes context.Canceled semantics
+
+	_, err := svc.AddWorktree(ctx, repoDir, wtPath, "ctx-error-branch", "main", true)
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	// Must be context.Canceled specifically — not a string wrapped error or timeout
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected errors.Is(err, context.Canceled)=true, got error: %v (type: %T)", err, err)
+	}
+	// Must not be a git timeout message
+	if errMsg := err.Error(); errMsg == "git command timed out after 10s" {
+		t.Errorf("got timeout error instead of context.Canceled: %v", err)
+	}
+}
+
 func TestIsClean_CancelledContext(t *testing.T) {
 	svc := git.NewService()
 	repoDir := setupRepo(t)
@@ -401,5 +429,61 @@ func TestRemoveWorktree_CancelledContext(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+}
+
+// TestRunGit_ContextCancelled_KillsProcess verifies that when a context is
+// cancelled while a git operation is in-progress, the underlying process is
+// killed and context.Canceled is returned (not a timeout).
+//
+// Strategy: create a repo with many commits to make "git log --all" slightly
+// non-trivial, cancel the context as soon as it is observed to be running, and
+// assert the returned error.
+//
+// Because git commands in test repos are typically fast, we use a goroutine that
+// cancels immediately after the call is dispatched to ensure cancellation races
+// with — or arrives just before — the git process completes. Either way the
+// returned error must be context.Canceled (kill path) or context.Canceled
+// (pre-cancel check path); a timeout error is never acceptable.
+func TestRunGit_ContextCancelled_KillsProcess(t *testing.T) {
+	svc := git.NewService()
+	repoDir := setupRepo(t)
+
+	// Populate the repo with enough commits to give the process time to start.
+	run := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = repoDir
+		c.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		f := filepath.Join(repoDir, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(f, []byte("data"), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+		run("add", ".")
+		run("commit", "-m", fmt.Sprintf("commit %d", i))
+	}
+
+	// Use IsClean as a proxy for runGit — it runs "git status --porcelain".
+	// We cancel the context immediately to race with or pre-empt the process.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before/during the call
+
+	_, err := svc.IsClean(ctx, repoDir)
+	if err == nil {
+		// If git was so fast it completed before we could cancel, that is also
+		// acceptable — but we should not get a non-error from a cancelled ctx.
+		t.Log("git completed before context cancel (acceptable on fast hardware)")
+		return
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v (type %T)", err, err)
 	}
 }

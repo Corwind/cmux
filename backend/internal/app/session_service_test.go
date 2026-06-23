@@ -14,10 +14,15 @@ import (
 )
 
 // --- Mock SessionRepository ---
+// mockRepo is goroutine-safe: all map accesses are protected by mu so that
+// concurrent reads from tests and writes from the provision goroutine cannot
+// trigger the race detector.
 
 type mockRepo struct {
-	sessions map[string]domain.Session
-	createFn func(ctx context.Context, s domain.Session) error
+	mu        sync.RWMutex
+	sessions  map[string]domain.Session
+	createFn  func(ctx context.Context, s domain.Session) error
+	updateErr error // if set, Update returns this error
 }
 
 func newMockRepo() *mockRepo {
@@ -28,11 +33,15 @@ func (m *mockRepo) Create(ctx context.Context, s domain.Session) error {
 	if m.createFn != nil {
 		return m.createFn(ctx, s)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sessions[s.ID] = s
 	return nil
 }
 
 func (m *mockRepo) Get(ctx context.Context, id string) (domain.Session, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	s, ok := m.sessions[id]
 	if !ok {
 		return domain.Session{}, fmt.Errorf("session not found: %s", id)
@@ -41,6 +50,8 @@ func (m *mockRepo) Get(ctx context.Context, id string) (domain.Session, error) {
 }
 
 func (m *mockRepo) List(ctx context.Context) ([]domain.Session, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var result []domain.Session
 	for _, s := range m.sessions {
 		result = append(result, s)
@@ -49,18 +60,29 @@ func (m *mockRepo) List(ctx context.Context) ([]domain.Session, error) {
 }
 
 func (m *mockRepo) Update(ctx context.Context, s domain.Session) error {
+	if m.updateErr != nil {
+		return m.updateErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sessions[s.ID] = s
 	return nil
 }
 
 func (m *mockRepo) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.sessions, id)
 	return nil
 }
 
 // --- Mock ProcessManager ---
+// mockProcessManager is goroutine-safe: all fields are protected by mu so that
+// concurrent access from the provision goroutine and test code cannot trigger
+// the race detector.
 
 type mockProcessManager struct {
+	mu        sync.Mutex
 	alive     map[int]bool
 	handles   map[int]*ports.PTYHandle
 	doneChans map[int]chan error
@@ -80,6 +102,8 @@ func newMockProcessManager() *mockProcessManager {
 }
 
 func (m *mockProcessManager) Spawn(ctx context.Context, workingDir string, args ...string) (*ports.PTYHandle, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.spawnArgs = args
 	if m.spawnErr != nil {
 		return nil, m.spawnErr
@@ -103,20 +127,49 @@ func (m *mockProcessManager) Resize(pid int, rows, cols uint16) error {
 }
 
 func (m *mockProcessManager) Kill(pid int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.killPIDs = append(m.killPIDs, pid)
 	delete(m.alive, pid)
 	return nil
 }
 
 func (m *mockProcessManager) IsAlive(pid int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.alive[pid]
 }
 
 func (m *mockProcessManager) KillAll() {}
 
 func (m *mockProcessManager) GetHandle(pid int) (*ports.PTYHandle, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	h, ok := m.handles[pid]
 	return h, ok
+}
+
+// killPIDsSafe returns a copy of killPIDs safely.
+func (m *mockProcessManager) killPIDsSafe() []int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]int, len(m.killPIDs))
+	copy(result, m.killPIDs)
+	return result
+}
+
+// nextPIDSafe returns nextPID safely.
+func (m *mockProcessManager) nextPIDSafe() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.nextPID
+}
+
+// doneChans returns a copy of the done channel for the given PID safely.
+func (m *mockProcessManager) getDoneChan(pid int) chan error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.doneChans[pid]
 }
 
 // --- Mock ProcessManager with SandboxContentProvider ---
@@ -137,8 +190,11 @@ func (m *mockSandboxProcessManager) SetSandboxContent(contents []string) {
 }
 
 // --- Mock GitService ---
+// mockGitService is goroutine-safe: removedWorktrees/forceFlags are protected
+// by mu since they are appended from the provision goroutine.
 
 type mockGitService struct {
+	mu               sync.Mutex
 	infoFn           func(path string) (ports.GitInfo, error)
 	addWorktreeFn    func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error)
 	removeWorktreeFn func(ctx context.Context, repoRoot, wtPath string, force bool) error
@@ -170,10 +226,13 @@ func (m *mockGitService) AddWorktree(ctx context.Context, repoRoot, wtPath, bran
 }
 
 func (m *mockGitService) RemoveWorktree(ctx context.Context, repoRoot, wtPath string, force bool) error {
+	m.mu.Lock()
 	m.removedWorktrees = append(m.removedWorktrees, wtPath)
 	m.forceFlags = append(m.forceFlags, force)
-	if m.removeWorktreeFn != nil {
-		return m.removeWorktreeFn(ctx, repoRoot, wtPath, force)
+	fn := m.removeWorktreeFn
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, repoRoot, wtPath, force)
 	}
 	return nil
 }
@@ -183,6 +242,24 @@ func (m *mockGitService) IsClean(ctx context.Context, path string) (bool, error)
 		return m.isCleanFn(ctx, path)
 	}
 	return true, nil
+}
+
+// removedWorktreesSafe returns a safe copy of removedWorktrees.
+func (m *mockGitService) removedWorktreesSafe() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]string, len(m.removedWorktrees))
+	copy(result, m.removedWorktrees)
+	return result
+}
+
+// forceFlagsSafe returns a safe copy of forceFlags.
+func (m *mockGitService) forceFlagsSafe() []bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]bool, len(m.forceFlags))
+	copy(result, m.forceFlags)
+	return result
 }
 
 // --- Helper ---
@@ -1268,6 +1345,364 @@ func TestGetPTYHandle_ProvisioningSession_ReturnsError(t *testing.T) {
 	}
 	if !errors.Is(err, ErrSessionProvisioning) {
 		t.Errorf("expected ErrSessionProvisioning, got %v", err)
+	}
+}
+
+// --- Comprehensive edge-case, concurrency, and failure-path tests ---
+
+// TestProvisionWorktree_ContextCancelledDuringAddWorktree verifies that
+// cancelling the provision context mid-flight (while AddWorktree is blocking)
+// causes the session to transition to StatusFailed and the goroutine to exit.
+func TestProvisionWorktree_ContextCancelledDuringAddWorktree(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	broadcaster := newMockBroadcaster()
+
+	// AddWorktree blocks until ctx is done — simulates a slow git operation.
+	goroutineExited := make(chan struct{})
+	git.addWorktreeFn = func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+		defer close(goroutineExited)
+		<-ctx.Done()
+		return ports.Worktree{}, ctx.Err()
+	}
+
+	svc := NewSessionService(repo, pm, nil,
+		WithGitService(git, "/wt"),
+		WithBroadcaster(broadcaster),
+	)
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "ctx-cancel-prov",
+		WorkingDir: "/repo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/repo",
+			Branch:       "feat/ctx-cancel",
+			CreateBranch: true,
+			Path:         "/wt/repo/feat-ctx-cancel",
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error from CreateSession: %v", err)
+	}
+	if session.Status != domain.StatusProvisioning {
+		t.Fatalf("expected StatusProvisioning immediately, got %q", session.Status)
+	}
+
+	// Cancel the provision by deleting the session
+	if err := svc.DeleteSession(context.Background(), session.ID); err != nil {
+		t.Fatalf("unexpected error from DeleteSession: %v", err)
+	}
+
+	// Goroutine must exit cleanly
+	select {
+	case <-goroutineExited:
+		// good — goroutine observed context cancellation and returned
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out: provision goroutine did not exit after context cancellation")
+	}
+
+	// The broadcaster must have fired a StatusFailed event
+	evt := broadcaster.waitForEvent(t, 2*time.Second)
+	if evt.status != string(domain.StatusFailed) {
+		t.Errorf("expected StatusFailed broadcast after context cancellation, got %q", evt.status)
+	}
+
+	// The session must now be StatusFailed in the repo (it was deleted, so Get should fail)
+	_, getErr := repo.Get(context.Background(), session.ID)
+	if getErr == nil {
+		// Session was re-stored as Failed after cancellation — check status
+		stored, _ := repo.Get(context.Background(), session.ID)
+		if stored.Status != domain.StatusFailed {
+			t.Errorf("expected session status to be Failed, got %q", stored.Status)
+		}
+	}
+	// If getErr != nil, the session was deleted before the goroutine updated it,
+	// which is also a valid outcome — the goroutine must have exited cleanly.
+}
+
+// TestProvisionWorktree_ConcurrentProvisions verifies that 5 concurrent sessions
+// with worktrees each resolve independently with the correct PID.
+func TestProvisionWorktree_ConcurrentProvisions(t *testing.T) {
+	const n = 5
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	broadcaster := newMockBroadcaster()
+
+	svc := NewSessionService(repo, pm, nil,
+		WithGitService(git, "/wt"),
+		WithBroadcaster(broadcaster),
+	)
+
+	type result struct {
+		session domain.Session
+		err     error
+	}
+	results := make([]result, n)
+	var wg sync.WaitGroup
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			s, err := svc.CreateSession(context.Background(), CreateSessionInput{
+				Name:       fmt.Sprintf("concurrent-session-%d", i),
+				WorkingDir: "/repo",
+				Worktree: &WorktreeSpec{
+					RepoPath:     "/repo",
+					Branch:       fmt.Sprintf("feat/concurrent-%d", i),
+					CreateBranch: true,
+					Path:         fmt.Sprintf("/wt/repo/concurrent-%d", i),
+				},
+			})
+			results[i] = result{s, err}
+		}(i)
+	}
+	wg.Wait()
+
+	// All CreateSession calls must succeed with StatusProvisioning
+	for i, r := range results {
+		if r.err != nil {
+			t.Errorf("session %d: unexpected error: %v", i, r.err)
+			continue
+		}
+		if r.session.Status != domain.StatusProvisioning {
+			t.Errorf("session %d: expected StatusProvisioning, got %q", i, r.session.Status)
+		}
+	}
+
+	// Wait for all n "running" broadcast events
+	runningCount := 0
+	for runningCount < n {
+		select {
+		case evt := <-broadcaster.ch:
+			if evt.status == string(domain.StatusRunning) {
+				runningCount++
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for all sessions to reach running (got %d/%d)", runningCount, n)
+		}
+	}
+
+	// Each session must be stored as running with a unique PID
+	seenPIDs := make(map[int]bool)
+	for _, r := range results {
+		if r.err != nil {
+			continue
+		}
+		stored := waitForSessionStatus(t, repo, r.session.ID, domain.StatusRunning, 2*time.Second)
+		if stored.PID == 0 {
+			t.Errorf("session %s: expected non-zero PID", r.session.ID)
+		}
+		if seenPIDs[stored.PID] {
+			t.Errorf("session %s: duplicate PID %d", r.session.ID, stored.PID)
+		}
+		seenPIDs[stored.PID] = true
+	}
+	if len(seenPIDs) != n {
+		t.Errorf("expected %d unique PIDs, got %d", n, len(seenPIDs))
+	}
+}
+
+// TestDeleteSession_WhileProvisioning verifies that deleting a session that is
+// still provisioning cancels the provision goroutine and removes the session
+// record from the repository.
+func TestDeleteSession_WhileProvisioning(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+
+	// Block AddWorktree until we call DeleteSession, then let it complete
+	// with a context.Canceled error.
+	provStarted := make(chan struct{})
+	var provCtxDone <-chan struct{}
+	git.addWorktreeFn = func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+		provCtxDone = ctx.Done()
+		close(provStarted)
+		<-ctx.Done()
+		return ports.Worktree{}, ctx.Err()
+	}
+
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/wt"))
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "delete-while-prov",
+		WorkingDir: "/repo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/repo",
+			Branch:       "feat/delete-prov",
+			CreateBranch: true,
+			Path:         "/wt/repo/delete-prov",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Wait for the goroutine to be inside AddWorktree
+	select {
+	case <-provStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for provision goroutine to start AddWorktree")
+	}
+
+	// Delete while provisioning
+	if err := svc.DeleteSession(context.Background(), session.ID); err != nil {
+		t.Fatalf("unexpected error from DeleteSession: %v", err)
+	}
+
+	// Session must be gone from the repository
+	if _, err := repo.Get(context.Background(), session.ID); err == nil {
+		t.Error("expected session to be deleted from repo after DeleteSession")
+	}
+
+	// The provision context must be cancelled
+	select {
+	case <-provCtxDone:
+		// good
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out: provision context was not cancelled after DeleteSession")
+	}
+
+	// No process must have been spawned
+	if pids := pm.killPIDsSafe(); len(pids) != 0 {
+		t.Errorf("expected no process to have been killed (none spawned), got %v", pids)
+	}
+}
+
+// TestCreateSession_NonWorktree_StillSync verifies that a session without a
+// worktree spec is still created synchronously and returns StatusRunning.
+func TestCreateSession_NonWorktree_StillSync(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+
+	// Block AddWorktree to prove it is never called on the sync path.
+	addCalled := false
+	git.addWorktreeFn = func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+		addCalled = true
+		return ports.Worktree{}, nil
+	}
+
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/wt"))
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "sync-session",
+		WorkingDir: "/tmp",
+		// No Worktree spec → synchronous path
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Must return immediately as StatusRunning (synchronous)
+	if session.Status != domain.StatusRunning {
+		t.Errorf("expected StatusRunning for non-worktree session, got %q", session.Status)
+	}
+	if session.PID == 0 {
+		t.Error("expected PID to be set synchronously")
+	}
+
+	// Session is immediately persisted and retrievable
+	stored, err := repo.Get(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("session not in repo: %v", err)
+	}
+	if stored.Status != domain.StatusRunning {
+		t.Errorf("expected stored status running, got %q", stored.Status)
+	}
+
+	// AddWorktree must never have been called
+	if addCalled {
+		t.Error("AddWorktree should not be called on the synchronous (non-worktree) path")
+	}
+}
+
+// TestGetPTYHandle_FailedSession verifies that trying to get a PTY handle for
+// a failed session returns a descriptive error (not ErrSessionProvisioning).
+func TestGetPTYHandle_FailedSession(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm, nil)
+
+	sess := domain.Session{
+		ID:         "sess-failed",
+		Name:       "failed",
+		WorkingDir: "/tmp/wt",
+		Status:     domain.StatusFailed,
+		Error:      "spawn process: exec failed",
+	}
+	_ = repo.Create(context.Background(), sess)
+
+	_, err := svc.GetPTYHandle("sess-failed")
+	if err == nil {
+		t.Fatal("expected error for failed session")
+	}
+	// Must not be ErrSessionProvisioning
+	if errors.Is(err, ErrSessionProvisioning) {
+		t.Errorf("expected non-provisioning error for failed session, got ErrSessionProvisioning")
+	}
+}
+
+// TestProvisionWorktree_SyncMap_ConcurrentAccessNoPanic exercises the
+// sync.Map used for provisionCtxs with concurrent CreateSession and
+// DeleteSession calls to verify no races or panics occur under the race
+// detector.
+func TestProvisionWorktree_SyncMap_ConcurrentAccessNoPanic(t *testing.T) {
+	const n = 10
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	broadcaster := newMockBroadcaster()
+
+	// Make AddWorktree slightly delayed to increase the chance that Delete
+	// races with provision in-flight.
+	git.addWorktreeFn = func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+		select {
+		case <-ctx.Done():
+			return ports.Worktree{}, ctx.Err()
+		default:
+		}
+		return ports.Worktree{Path: wtPath, Branch: branch}, nil
+	}
+
+	svc := NewSessionService(repo, pm, nil,
+		WithGitService(git, "/wt"),
+		WithBroadcaster(broadcaster),
+	)
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			s, err := svc.CreateSession(context.Background(), CreateSessionInput{
+				Name:       fmt.Sprintf("race-session-%d", i),
+				WorkingDir: "/repo",
+				Worktree: &WorktreeSpec{
+					RepoPath:     "/repo",
+					Branch:       fmt.Sprintf("feat/race-%d", i),
+					CreateBranch: true,
+					Path:         fmt.Sprintf("/wt/repo/race-%d", i),
+				},
+			})
+			if err != nil {
+				return
+			}
+			// Immediately try to delete — races with provision goroutine
+			_ = svc.DeleteSession(context.Background(), s.ID)
+		}(i)
+	}
+	wg.Wait()
+	// Drain any broadcaster events to avoid goroutine leaks
+	done := time.After(2 * time.Second)
+	for {
+		select {
+		case <-broadcaster.ch:
+		case <-done:
+			return
+		}
 	}
 }
 
