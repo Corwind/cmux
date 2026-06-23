@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -91,7 +91,7 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 			n, err := handle.PTY.Read(buf)
 			if err != nil {
 				if err != io.EOF {
-					log.Printf("PTY read error for session %s: %v", sessionID, err)
+					slog.Error("PTY read error", "session_id", sessionID, "err", err)
 				}
 				if conn := bridge.getConn(); conn != nil {
 					_ = conn.Write(context.Background(), websocket.MessageText, []byte(`{"type":"status","status":"stopped"}`))
@@ -121,7 +121,7 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 
 			if conn := bridge.getConn(); conn != nil {
 				if err := conn.Write(context.Background(), websocket.MessageBinary, data); err != nil {
-					log.Printf("websocket write error: %v", err)
+					slog.Error("websocket write error", "err", err)
 				}
 			}
 		}
@@ -144,14 +144,14 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
-		log.Printf("websocket accept error: %v", err)
+		slog.Error("websocket accept error", "err", err)
 		return
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	conn.SetReadLimit(128 * 1024) // 128KB read limit
 
-	log.Printf("new WebSocket connection for session %s", sessionID)
+	slog.Info("new WebSocket connection", "session_id", sessionID)
 	bridge := h.getBridge(sessionID, handle)
 	bridge.setConn(conn)
 
@@ -169,7 +169,7 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		switch msgType {
 		case websocket.MessageBinary:
 			if _, err := handle.PTY.Write(data); err != nil {
-				log.Printf("PTY write error: %v", err)
+				slog.Error("PTY write error", "err", err)
 				return
 			}
 		case websocket.MessageText:
@@ -207,7 +207,7 @@ func (h *WebSocketHandler) HandleNotifications(w http.ResponseWriter, r *http.Re
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
-		log.Printf("notification websocket accept error: %v", err)
+		slog.Error("notification websocket accept error", "err", err)
 		return
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()

@@ -3,7 +3,7 @@ package pty
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,7 +131,7 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	// sandbox-exec, so the real /usr/bin/open can't communicate with the browser).
 	wrapperDir, wrapErr := installOpenWrapper(env)
 	if wrapErr != nil {
-		log.Printf("failed to install open wrapper: %v", wrapErr)
+		slog.Warn("failed to install open wrapper", "err", wrapErr)
 	} else {
 		env = prependToPath(env, wrapperDir)
 	}
@@ -206,7 +206,7 @@ func (m *Manager) Kill(pid int) error {
 		_ = os.RemoveAll(proc.wrapperDir)
 	}
 	if err := proc.handle.PTY.Close(); err != nil {
-		log.Printf("failed to close PTY for pid %d: %v", pid, err)
+		slog.Error("failed to close PTY", "pid", pid, "err", err)
 	}
 	return proc.cmd.Process.Signal(syscall.SIGTERM)
 }
@@ -225,7 +225,7 @@ func (m *Manager) KillAll() {
 			_ = os.RemoveAll(p.wrapperDir)
 		}
 		if err := p.handle.PTY.Close(); err != nil {
-			log.Printf("failed to close PTY for pid %d: %v", p.handle.PID, err)
+			slog.Error("failed to close PTY", "pid", p.handle.PID, "err", err)
 		}
 		_ = p.cmd.Process.Signal(syscall.SIGTERM)
 	}

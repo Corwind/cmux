@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -79,9 +79,11 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		// Validate repo
 		info, err := s.gitService.Info(spec.RepoPath)
 		if err != nil {
+			slog.Error("failed to get git info for session creation", "repo_path", spec.RepoPath, "err", err)
 			return domain.Session{}, fmt.Errorf("git info: %w", err)
 		}
 		if !info.IsRepo {
+			slog.Error("path is not a git repository", "repo_path", spec.RepoPath)
 			return domain.Session{}, fmt.Errorf("%q is not a git repository", spec.RepoPath)
 		}
 
@@ -93,10 +95,13 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 			wtPath = filepath.Join(s.worktreesDir, repoBase, safeBranch)
 		}
 
+		slog.Info("creating git worktree", "repo_root", info.RepoRoot, "path", wtPath, "branch", spec.Branch)
 		wt, err := s.gitService.AddWorktree(info.RepoRoot, wtPath, spec.Branch, spec.BaseRef, spec.CreateBranch)
 		if err != nil {
+			slog.Error("failed to create git worktree", "repo_root", info.RepoRoot, "path", wtPath, "branch", spec.Branch, "err", err)
 			return domain.Session{}, fmt.Errorf("create worktree: %w", err)
 		}
+		slog.Info("git worktree created", "path", wt.Path, "branch", wt.Branch)
 
 		workingDir = wt.Path
 		repoRoot = info.RepoRoot
@@ -106,6 +111,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 
 	session, err := domain.NewSession(input.Name, workingDir)
 	if err != nil {
+		slog.Error("invalid session parameters", "name", input.Name, "working_dir", workingDir, "err", err)
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
 	}
 	session.RepoRoot = repoRoot
@@ -119,11 +125,15 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	if input.SkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
 	}
+	slog.Info("spawning session process", "session_id", session.ID, "working_dir", workingDir)
 	handle, err := s.processManager.Spawn(ctx, workingDir, args...)
 	if err != nil {
+		slog.Error("failed to spawn session process", "session_id", session.ID, "working_dir", workingDir, "err", err)
 		// Best-effort cleanup of orphaned worktree
 		if worktreeManaged && s.gitService != nil {
-			_ = s.gitService.RemoveWorktree(repoRoot, workingDir, true)
+			if cleanErr := s.gitService.RemoveWorktree(repoRoot, workingDir, true); cleanErr != nil {
+				slog.Error("failed to clean up orphaned worktree after spawn failure", "path", workingDir, "err", cleanErr)
+			}
 		}
 		return domain.Session{}, fmt.Errorf("failed to spawn process: %w", err)
 	}
@@ -134,12 +144,19 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	session.SkipPermissions = input.SkipPermissions
 
 	if err := s.repo.Create(ctx, session); err != nil {
-		_ = s.processManager.Kill(handle.PID)
+		slog.Error("failed to persist session", "session_id", session.ID, "pid", handle.PID, "err", err)
+		if killErr := s.processManager.Kill(handle.PID); killErr != nil {
+			slog.Error("failed to kill process after session persist failure", "pid", handle.PID, "err", killErr)
+		}
 		if worktreeManaged && s.gitService != nil {
-			_ = s.gitService.RemoveWorktree(repoRoot, workingDir, true)
+			if cleanErr := s.gitService.RemoveWorktree(repoRoot, workingDir, true); cleanErr != nil {
+				slog.Error("failed to clean up orphaned worktree after persist failure", "path", workingDir, "err", cleanErr)
+			}
 		}
 		return domain.Session{}, fmt.Errorf("failed to store session: %w", err)
 	}
+
+	slog.Info("session created", "session_id", session.ID, "name", session.Name, "pid", session.PID, "working_dir", workingDir)
 
 	if worktreeManaged && s.worktreeRepo != nil {
 		s.trackWorktreeSession(ctx, session)
@@ -155,6 +172,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 func (s *SessionService) trackWorktreeSession(ctx context.Context, session domain.Session) {
 	wt, err := s.worktreeRepo.GetByPath(ctx, session.WorkingDir)
 	if err != nil {
+		slog.Info("no existing worktree record found, creating one", "path", session.WorkingDir)
 		wt = domain.ManagedWorktree{
 			ID:        uuid.New().String(),
 			Path:      session.WorkingDir,
@@ -163,12 +181,13 @@ func (s *SessionService) trackWorktreeSession(ctx context.Context, session domai
 			CreatedAt: session.CreatedAt,
 		}
 		if createErr := s.worktreeRepo.Create(ctx, wt); createErr != nil {
-			log.Printf("failed to create worktree record for %s: %v", session.WorkingDir, createErr)
+			slog.Error("failed to create worktree record", "path", session.WorkingDir, "err", createErr)
 			return
 		}
+		slog.Info("worktree record created", "worktree_id", wt.ID, "path", wt.Path, "branch", wt.Branch)
 	}
 	if setErr := s.worktreeRepo.SetSession(ctx, wt.ID, &session.ID); setErr != nil {
-		log.Printf("failed to set session %s on worktree %s: %v", session.ID, wt.ID, setErr)
+		slog.Error("failed to set session on worktree", "session_id", session.ID, "worktree_id", wt.ID, "err", setErr)
 	}
 }
 
@@ -193,7 +212,7 @@ func (s *SessionService) applySandboxContent(ctx context.Context, templateID str
 
 	if err != nil {
 		if templateID != "" {
-			log.Printf("failed to resolve template %s: %v", templateID, err)
+			slog.Error("failed to resolve template", "template_id", templateID, "err", err)
 		}
 		return
 	}
@@ -377,10 +396,18 @@ func (s *SessionService) DeleteWorktree(ctx context.Context, id string) error {
 	}
 
 	if s.gitService != nil {
-		_ = s.gitService.RemoveWorktree(wt.RepoRoot, wt.Path, false)
+		if err := s.gitService.RemoveWorktree(wt.RepoRoot, wt.Path, false); err != nil {
+			slog.Error("failed to remove git worktree", "worktree_id", id, "path", wt.Path, "err", err)
+		}
 	}
 
-	return s.worktreeRepo.Delete(ctx, id)
+	if err := s.worktreeRepo.Delete(ctx, id); err != nil {
+		slog.Error("failed to delete worktree record", "worktree_id", id, "err", err)
+		return err
+	}
+
+	slog.Info("worktree deleted", "worktree_id", id, "path", wt.Path)
+	return nil
 }
 
 func (s *SessionService) watchProcess(sessionID string, handle *ports.PTYHandle) {

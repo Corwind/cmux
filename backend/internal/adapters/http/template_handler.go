@@ -2,7 +2,7 @@ package http
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/Corwind/cmux/backend/internal/app"
@@ -75,7 +75,7 @@ func (h *TemplateHandler) Create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(toTemplateResponse(tmpl)); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 
@@ -93,7 +93,7 @@ func (h *TemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 
@@ -107,7 +107,7 @@ func (h *TemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(toTemplateResponse(tmpl)); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 
@@ -128,7 +128,7 @@ func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(toTemplateResponse(tmpl)); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 
@@ -175,7 +175,7 @@ func (h *TemplateHandler) Import(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(toTemplateResponse(tmpl)); err != nil {
-		log.Printf("failed to encode response: %v", err)
+		slog.Error("failed to encode response", "err", err)
 	}
 }
 
@@ -190,6 +190,6 @@ func (h *TemplateHandler) Export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename="+exported.Name+".sbpl")
 	if _, err := w.Write([]byte(exported.Content)); err != nil {
-		log.Printf("failed to write export response: %v", err)
+		slog.Error("failed to write export response", "err", err)
 	}
 }

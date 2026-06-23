@@ -3,7 +3,7 @@ package config
 import (
 	"bufio"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -39,7 +39,7 @@ func ResolveShellEnv(cfg domain.Config) []string {
 	}
 
 	if err != nil {
-		log.Printf("warning: could not capture shell env: %v (falling back to process env)", err)
+		slog.Warn("could not capture shell env, falling back to process env", "err", err)
 		base = os.Environ()
 	}
 

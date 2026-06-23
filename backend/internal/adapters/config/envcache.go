@@ -1,7 +1,7 @@
 package config
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -31,7 +31,7 @@ func NewEnvCache(resolver func() []string, ttl time.Duration) *EnvCache {
 	start := time.Now()
 	c.env = resolver()
 	c.resolvedAt = time.Now()
-	log.Printf("shell env resolved in %s (%d vars)", time.Since(start), len(c.env))
+	slog.Info("shell env resolved", "duration", time.Since(start), "vars", len(c.env))
 
 	return c
 }
@@ -69,5 +69,5 @@ func (c *EnvCache) backgroundRefresh() {
 	c.refreshing = false
 	c.mu.Unlock()
 
-	log.Printf("shell env refreshed in %s (%d vars)", time.Since(start), len(env))
+	slog.Info("shell env refreshed", "duration", time.Since(start), "vars", len(env))
 }
