@@ -94,9 +94,11 @@ func TestCreateSession_WithWorktree_TracksInDB(t *testing.T) {
 	pm := newMockProcessManager()
 	git := newMockGitService()
 	wtr := newMockWorktreeRepo()
+	broadcaster := newMockBroadcaster()
 	svc := NewSessionService(repo, pm, nil,
 		WithGitService(git, "/tmp/worktrees"),
 		WithWorktreeRepository(wtr),
+		WithBroadcaster(broadcaster),
 	)
 
 	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
@@ -113,6 +115,9 @@ func TestCreateSession_WithWorktree_TracksInDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	// Wait for the async goroutine to complete (broadcaster fires on StatusRunning)
+	broadcaster.waitForEvent(t, 2*time.Second)
 
 	// Worktree record must be created
 	wt, err := wtr.GetByPath(context.Background(), session.WorkingDir)
@@ -134,6 +139,7 @@ func TestCreateSession_WithWorktree_AdoptsExistingRecord(t *testing.T) {
 	pm := newMockProcessManager()
 	git := newMockGitService()
 	wtr := newMockWorktreeRepo()
+	broadcaster := newMockBroadcaster()
 
 	// Pre-populate a worktree record for the same path
 	existing := domain.ManagedWorktree{
@@ -148,6 +154,7 @@ func TestCreateSession_WithWorktree_AdoptsExistingRecord(t *testing.T) {
 	svc := NewSessionService(repo, pm, nil,
 		WithGitService(git, "/tmp/worktrees"),
 		WithWorktreeRepository(wtr),
+		WithBroadcaster(broadcaster),
 	)
 
 	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
@@ -163,6 +170,9 @@ func TestCreateSession_WithWorktree_AdoptsExistingRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	// Wait for async goroutine to complete
+	broadcaster.waitForEvent(t, 2*time.Second)
 
 	// Still just one worktree record
 	wts, _ := wtr.List(context.Background())

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -12,6 +13,17 @@ import (
 	"github.com/Corwind/cmux/backend/internal/ports"
 	"github.com/google/uuid"
 )
+
+// ErrSessionProvisioning is returned when an operation requires a running session
+// but the session is still being provisioned.
+var ErrSessionProvisioning = errors.New("session is still provisioning")
+
+// SessionEventBroadcaster is implemented by the WebSocket hub (Track D) to push
+// live status updates to connected clients without creating a compile-time
+// dependency on the hub package here.
+type SessionEventBroadcaster interface {
+	BroadcastSessionStatus(sessionID, sessionName, status, errMsg string)
+}
 
 // WorktreeSpec describes how to create or attach a git worktree for a session.
 type WorktreeSpec struct {
@@ -39,6 +51,8 @@ type SessionService struct {
 	worktreeRepo   ports.WorktreeRepository
 	worktreesDir   string
 	mu             sync.RWMutex
+	provisionCtxs  sync.Map // key: sessionID string, value: context.CancelFunc
+	broadcaster    SessionEventBroadcaster
 }
 
 func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, templateRepo ports.TemplateRepository, opts ...SessionServiceOption) *SessionService {
@@ -68,55 +82,27 @@ func WithWorktreeRepository(repo ports.WorktreeRepository) SessionServiceOption 
 	}
 }
 
+// WithBroadcaster injects the WebSocket hub (Track D) so that async provisioning
+// can push status events to connected clients.
+func WithBroadcaster(b SessionEventBroadcaster) SessionServiceOption {
+	return func(s *SessionService) {
+		s.broadcaster = b
+	}
+}
+
 func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionInput) (domain.Session, error) {
 	workingDir := input.WorkingDir
-	var repoRoot, gitBranch string
-	var worktreeManaged bool
 
 	if input.Worktree != nil && s.gitService != nil {
-		spec := input.Worktree
-
-		// Validate repo
-		info, err := s.gitService.Info(spec.RepoPath)
-		if err != nil {
-			slog.Error("failed to get git info for session creation", "repo_path", spec.RepoPath, "err", err)
-			return domain.Session{}, fmt.Errorf("git info: %w", err)
-		}
-		if !info.IsRepo {
-			slog.Error("path is not a git repository", "repo_path", spec.RepoPath)
-			return domain.Session{}, fmt.Errorf("%q is not a git repository", spec.RepoPath)
-		}
-
-		// Compute worktree path
-		wtPath := spec.Path
-		if wtPath == "" {
-			safeBranch := strings.ReplaceAll(spec.Branch, "/", "-")
-			repoBase := filepath.Base(info.RepoRoot)
-			wtPath = filepath.Join(s.worktreesDir, repoBase, safeBranch)
-		}
-
-		slog.Info("creating git worktree", "repo_root", info.RepoRoot, "path", wtPath, "branch", spec.Branch)
-		wt, err := s.gitService.AddWorktree(info.RepoRoot, wtPath, spec.Branch, spec.BaseRef, spec.CreateBranch)
-		if err != nil {
-			slog.Error("failed to create git worktree", "repo_root", info.RepoRoot, "path", wtPath, "branch", spec.Branch, "err", err)
-			return domain.Session{}, fmt.Errorf("create worktree: %w", err)
-		}
-		slog.Info("git worktree created", "path", wt.Path, "branch", wt.Branch)
-
-		workingDir = wt.Path
-		repoRoot = info.RepoRoot
-		gitBranch = wt.Branch
-		worktreeManaged = true
+		return s.createSessionAsync(ctx, input)
 	}
 
+	// --- Synchronous path (no worktree) ---
 	session, err := domain.NewSession(input.Name, workingDir)
 	if err != nil {
 		slog.Error("invalid session parameters", "name", input.Name, "working_dir", workingDir, "err", err)
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
 	}
-	session.RepoRoot = repoRoot
-	session.GitBranch = gitBranch
-	session.WorktreeManaged = worktreeManaged
 
 	// Resolve sandbox template content
 	s.applySandboxContent(ctx, input.TemplateID)
@@ -129,12 +115,6 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	handle, err := s.processManager.Spawn(ctx, workingDir, args...)
 	if err != nil {
 		slog.Error("failed to spawn session process", "session_id", session.ID, "working_dir", workingDir, "err", err)
-		// Best-effort cleanup of orphaned worktree
-		if worktreeManaged && s.gitService != nil {
-			if cleanErr := s.gitService.RemoveWorktree(repoRoot, workingDir, true); cleanErr != nil {
-				slog.Error("failed to clean up orphaned worktree after spawn failure", "path", workingDir, "err", cleanErr)
-			}
-		}
 		return domain.Session{}, fmt.Errorf("failed to spawn process: %w", err)
 	}
 
@@ -148,23 +128,138 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		if killErr := s.processManager.Kill(handle.PID); killErr != nil {
 			slog.Error("failed to kill process after session persist failure", "pid", handle.PID, "err", killErr)
 		}
-		if worktreeManaged && s.gitService != nil {
-			if cleanErr := s.gitService.RemoveWorktree(repoRoot, workingDir, true); cleanErr != nil {
-				slog.Error("failed to clean up orphaned worktree after persist failure", "path", workingDir, "err", cleanErr)
-			}
-		}
 		return domain.Session{}, fmt.Errorf("failed to store session: %w", err)
 	}
 
 	slog.Info("session created", "session_id", session.ID, "name", session.Name, "pid", session.PID, "working_dir", workingDir)
 
-	if worktreeManaged && s.worktreeRepo != nil {
-		s.trackWorktreeSession(ctx, session)
+	go s.watchProcess(session.ID, handle)
+
+	return session, nil
+}
+
+// createSessionAsync handles the worktree path: it validates the repo, creates
+// a provisioning session in the DB, then launches async provisioning.
+func (s *SessionService) createSessionAsync(ctx context.Context, input CreateSessionInput) (domain.Session, error) {
+	spec := input.Worktree
+
+	// Validate repo
+	info, err := s.gitService.Info(input.WorkingDir)
+	if err != nil {
+		slog.Error("failed to get git info for session creation", "working_dir", input.WorkingDir, "err", err)
+		return domain.Session{}, fmt.Errorf("git info: %w", err)
+	}
+	if !info.IsRepo {
+		slog.Error("path is not a git repository", "working_dir", input.WorkingDir)
+		return domain.Session{}, fmt.Errorf("%q is not a git repository", input.WorkingDir)
+	}
+
+	// Compute worktree path
+	wtPath := spec.Path
+	if wtPath == "" {
+		safeBranch := strings.ReplaceAll(spec.Branch, "/", "-")
+		repoBase := filepath.Base(info.RepoRoot)
+		wtPath = filepath.Join(s.worktreesDir, repoBase, safeBranch)
+	}
+
+	// Create session with StatusProvisioning
+	session, err := domain.NewSession(input.Name, wtPath)
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
+	}
+	session.Status = domain.StatusProvisioning
+	session.RepoRoot = info.RepoRoot
+	session.GitBranch = spec.Branch
+	session.WorktreeManaged = true
+	session.TemplateID = input.TemplateID
+	session.SkipPermissions = input.SkipPermissions
+
+	if err := s.repo.Create(ctx, session); err != nil {
+		slog.Error("failed to persist provisioning session", "session_id", session.ID, "err", err)
+		return domain.Session{}, fmt.Errorf("failed to store session: %w", err)
+	}
+
+	// Create and register the cancellation context BEFORE launching the goroutine
+	// so that a concurrent DeleteSession cannot miss the cancel function.
+	provCtx, cancel := context.WithCancel(context.Background())
+	s.provisionCtxs.Store(session.ID, cancel)
+
+	slog.Info("session queued for provisioning", "session_id", session.ID, "worktree_path", wtPath, "branch", spec.Branch)
+
+	go s.provisionWorktree(session, input, *spec, info.RepoRoot, wtPath, provCtx, cancel)
+
+	return session, nil
+}
+
+// provisionWorktree is the async goroutine that creates the git worktree, spawns
+// the process, and transitions the session from StatusProvisioning to either
+// StatusRunning or StatusFailed.
+// provCtx and cancel are created by createSessionAsync before the goroutine is
+// launched so that a concurrent DeleteSession never misses the cancel function.
+func (s *SessionService) provisionWorktree(session domain.Session, input CreateSessionInput, spec WorktreeSpec, repoRoot, wtPath string, provCtx context.Context, cancel context.CancelFunc) {
+	defer func() {
+		cancel()
+		s.provisionCtxs.Delete(session.ID)
+	}()
+
+	wt, err := s.gitService.AddWorktree(provCtx, repoRoot, wtPath, spec.Branch, spec.BaseRef, spec.CreateBranch)
+	if err != nil {
+		slog.Error("failed to create git worktree", "session_id", session.ID, "path", wtPath, "branch", spec.Branch, "err", err)
+		session.Status = domain.StatusFailed
+		session.Error = fmt.Sprintf("create worktree: %s", err.Error())
+		_ = s.repo.Update(context.Background(), session)
+		if s.broadcaster != nil {
+			s.broadcaster.BroadcastSessionStatus(session.ID, session.Name, string(domain.StatusFailed), session.Error)
+		}
+		return
+	}
+	slog.Info("git worktree created", "session_id", session.ID, "path", wt.Path, "branch", wt.Branch)
+
+	workingDir := wt.Path
+
+	// Resolve sandbox template
+	s.applySandboxContent(provCtx, input.TemplateID)
+
+	args := []string{"--session-id", session.ClaudeSessionID}
+	if input.SkipPermissions {
+		args = append(args, "--dangerously-skip-permissions")
+	}
+
+	handle, err := s.processManager.Spawn(context.Background(), workingDir, args...)
+	if err != nil {
+		slog.Error("failed to spawn process for provisioning session", "session_id", session.ID, "err", err)
+		// Best-effort cleanup of the orphaned worktree
+		if cleanErr := s.gitService.RemoveWorktree(context.Background(), repoRoot, wtPath, true); cleanErr != nil {
+			slog.Error("failed to clean up orphaned worktree after spawn failure", "path", wtPath, "err", cleanErr)
+		}
+		session.Status = domain.StatusFailed
+		session.Error = fmt.Sprintf("spawn process: %s", err.Error())
+		_ = s.repo.Update(context.Background(), session)
+		if s.broadcaster != nil {
+			s.broadcaster.BroadcastSessionStatus(session.ID, session.Name, string(domain.StatusFailed), session.Error)
+		}
+		return
+	}
+
+	session.PID = handle.PID
+	session.Status = domain.StatusRunning
+	session.Error = ""
+
+	if err := s.repo.Update(context.Background(), session); err != nil {
+		slog.Error("failed to update session after provision", "session_id", session.ID, "err", err)
+	}
+
+	if s.worktreeRepo != nil {
+		s.trackWorktreeSession(context.Background(), session)
+	}
+
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastSessionStatus(session.ID, session.Name, string(domain.StatusRunning), "")
 	}
 
 	go s.watchProcess(session.ID, handle)
 
-	return session, nil
+	slog.Info("session provisioned and running", "session_id", session.ID, "pid", session.PID, "working_dir", workingDir)
 }
 
 // trackWorktreeSession creates or adopts a ManagedWorktree record for the given
@@ -296,6 +391,11 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 		return err
 	}
 
+	// Cancel any in-flight provisioning for this session
+	if cancelFn, ok := s.provisionCtxs.Load(id); ok {
+		cancelFn.(context.CancelFunc)()
+	}
+
 	if session.Status == domain.StatusRunning {
 		_ = s.processManager.Kill(session.PID)
 	}
@@ -309,6 +409,9 @@ func (s *SessionService) GetPTYHandle(sessionID string) (*ports.PTYHandle, error
 	session, err := s.repo.Get(context.Background(), sessionID)
 	if err != nil {
 		return nil, err
+	}
+	if session.Status == domain.StatusProvisioning {
+		return nil, ErrSessionProvisioning
 	}
 	if session.Status != domain.StatusRunning {
 		return nil, fmt.Errorf("session %s is not running", sessionID)
@@ -396,7 +499,7 @@ func (s *SessionService) DeleteWorktree(ctx context.Context, id string) error {
 	}
 
 	if s.gitService != nil {
-		if err := s.gitService.RemoveWorktree(wt.RepoRoot, wt.Path, false); err != nil {
+		if err := s.gitService.RemoveWorktree(ctx, wt.RepoRoot, wt.Path, false); err != nil {
 			slog.Error("failed to remove git worktree", "worktree_id", id, "path", wt.Path, "err", err)
 		}
 	}

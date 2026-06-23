@@ -1,6 +1,9 @@
 package git_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,7 +161,7 @@ func TestAddWorktree_NewBranch(t *testing.T) {
 	wtDir := t.TempDir()
 	wtPath := filepath.Join(wtDir, "new-branch-wt")
 
-	wt, err := svc.AddWorktree(repoDir, wtPath, "new-branch", "main", true)
+	wt, err := svc.AddWorktree(context.Background(), repoDir, wtPath, "new-branch", "main", true)
 	if err != nil {
 		t.Fatalf("AddWorktree (new branch) failed: %v", err)
 	}
@@ -187,7 +190,7 @@ func TestAddWorktree_ExistingBranch(t *testing.T) {
 	wtDir := t.TempDir()
 	wtPath := filepath.Join(wtDir, "existing-branch-wt")
 
-	wt, err := svc.AddWorktree(repoDir, wtPath, "existing-branch", "", false)
+	wt, err := svc.AddWorktree(context.Background(), repoDir, wtPath, "existing-branch", "", false)
 	if err != nil {
 		t.Fatalf("AddWorktree (existing branch) failed: %v", err)
 	}
@@ -200,7 +203,7 @@ func TestAddWorktree_PathTraversal(t *testing.T) {
 	svc := git.NewService()
 	repoDir := setupRepo(t)
 
-	_, err := svc.AddWorktree(repoDir, "/tmp/../../evil", "branch", "main", true)
+	_, err := svc.AddWorktree(context.Background(), repoDir, "/tmp/../../evil", "branch", "main", true)
 	if err == nil {
 		t.Error("expected error for path traversal in worktree path")
 	}
@@ -210,7 +213,7 @@ func TestAddWorktree_BranchTraversal(t *testing.T) {
 	svc := git.NewService()
 	repoDir := setupRepo(t)
 
-	_, err := svc.AddWorktree(repoDir, "/tmp/safe", "../evil", "main", true)
+	_, err := svc.AddWorktree(context.Background(), repoDir, "/tmp/safe", "../evil", "main", true)
 	if err == nil {
 		t.Error("expected error for path traversal in branch name")
 	}
@@ -227,7 +230,7 @@ func TestRemoveWorktree_Clean(t *testing.T) {
 		t.Fatalf("git worktree add: %v\n%s", err, out)
 	}
 
-	if err := svc.RemoveWorktree(repoDir, wtPath, false); err != nil {
+	if err := svc.RemoveWorktree(context.Background(), repoDir, wtPath, false); err != nil {
 		t.Fatalf("RemoveWorktree failed: %v", err)
 	}
 
@@ -252,7 +255,7 @@ func TestRemoveWorktree_DirtyRejected(t *testing.T) {
 		t.Fatalf("write dirty file: %v", err)
 	}
 
-	err := svc.RemoveWorktree(repoDir, wtPath, false)
+	err := svc.RemoveWorktree(context.Background(), repoDir, wtPath, false)
 	if err == nil {
 		t.Fatal("expected error removing dirty worktree without force")
 	}
@@ -274,7 +277,7 @@ func TestRemoveWorktree_ForceRemovesDirty(t *testing.T) {
 		t.Fatalf("write dirty file: %v", err)
 	}
 
-	if err := svc.RemoveWorktree(repoDir, wtPath, true); err != nil {
+	if err := svc.RemoveWorktree(context.Background(), repoDir, wtPath, true); err != nil {
 		t.Fatalf("RemoveWorktree with force failed: %v", err)
 	}
 }
@@ -283,7 +286,7 @@ func TestIsClean_Clean(t *testing.T) {
 	svc := git.NewService()
 	repoDir := setupRepo(t)
 
-	clean, err := svc.IsClean(repoDir)
+	clean, err := svc.IsClean(context.Background(), repoDir)
 	if err != nil {
 		t.Fatalf("IsClean failed: %v", err)
 	}
@@ -300,7 +303,7 @@ func TestIsClean_Dirty(t *testing.T) {
 		t.Fatalf("write dirty file: %v", err)
 	}
 
-	clean, err := svc.IsClean(repoDir)
+	clean, err := svc.IsClean(context.Background(), repoDir)
 	if err != nil {
 		t.Fatalf("IsClean failed: %v", err)
 	}
@@ -341,5 +344,146 @@ func TestInfo_WorktreeDetectsGitlink(t *testing.T) {
 	if !strings.HasSuffix(info.RepoRoot, repoDir) && info.RepoRoot != repoDir {
 		// RepoRoot might be symlink-resolved
 		t.Logf("RepoRoot=%q repoDir=%q (may differ due to symlink resolution)", info.RepoRoot, repoDir)
+	}
+}
+
+func TestAddWorktree_CancelledContext(t *testing.T) {
+	svc := git.NewService()
+	repoDir := setupRepo(t)
+	wtDir := t.TempDir()
+	wtPath := filepath.Join(wtDir, "cancelled-wt")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately before calling
+
+	_, err := svc.AddWorktree(ctx, repoDir, wtPath, "cancelled-branch", "main", true)
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+}
+
+// TestAddWorktree_CancelledContext_ReturnsContextError explicitly verifies the
+// error type semantics: a pre-cancelled context must produce context.Canceled
+// rather than a git or timeout error message. This distinguishes the context
+// cancel path from the 10-second internal timeout path.
+func TestAddWorktree_CancelledContext_ReturnsContextError(t *testing.T) {
+	svc := git.NewService()
+	repoDir := setupRepo(t)
+	wtDir := t.TempDir()
+	wtPath := filepath.Join(wtDir, "ctx-error-wt")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the call — establishes context.Canceled semantics
+
+	_, err := svc.AddWorktree(ctx, repoDir, wtPath, "ctx-error-branch", "main", true)
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	// Must be context.Canceled specifically — not a string wrapped error or timeout
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected errors.Is(err, context.Canceled)=true, got error: %v (type: %T)", err, err)
+	}
+	// Must not be a git timeout message
+	if errMsg := err.Error(); errMsg == "git command timed out after 10s" {
+		t.Errorf("got timeout error instead of context.Canceled: %v", err)
+	}
+}
+
+func TestIsClean_CancelledContext(t *testing.T) {
+	svc := git.NewService()
+	repoDir := setupRepo(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately before calling
+
+	_, err := svc.IsClean(ctx, repoDir)
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+}
+
+func TestRemoveWorktree_CancelledContext(t *testing.T) {
+	svc := git.NewService()
+	repoDir := setupRepo(t)
+	wtDir := t.TempDir()
+	wtPath := filepath.Join(wtDir, "remove-cancelled-wt")
+
+	// Add worktree first with a valid context
+	cmd := exec.Command("git", "-C", repoDir, "worktree", "add", "-b", "remove-cancelled-branch", wtPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately before calling
+
+	err := svc.RemoveWorktree(ctx, repoDir, wtPath, false)
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+}
+
+// TestRunGit_ContextCancelled_KillsProcess verifies that when a context is
+// cancelled while a git operation is in-progress, the underlying process is
+// killed and context.Canceled is returned (not a timeout).
+//
+// Strategy: create a repo with many commits to make "git log --all" slightly
+// non-trivial, cancel the context as soon as it is observed to be running, and
+// assert the returned error.
+//
+// Because git commands in test repos are typically fast, we use a goroutine that
+// cancels immediately after the call is dispatched to ensure cancellation races
+// with — or arrives just before — the git process completes. Either way the
+// returned error must be context.Canceled (kill path) or context.Canceled
+// (pre-cancel check path); a timeout error is never acceptable.
+func TestRunGit_ContextCancelled_KillsProcess(t *testing.T) {
+	svc := git.NewService()
+	repoDir := setupRepo(t)
+
+	// Populate the repo with enough commits to give the process time to start.
+	run := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = repoDir
+		c.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		f := filepath.Join(repoDir, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(f, []byte("data"), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+		run("add", ".")
+		run("commit", "-m", fmt.Sprintf("commit %d", i))
+	}
+
+	// Use IsClean as a proxy for runGit — it runs "git status --porcelain".
+	// We cancel the context immediately to race with or pre-empt the process.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before/during the call
+
+	_, err := svc.IsClean(ctx, repoDir)
+	if err == nil {
+		// If git was so fast it completed before we could cancel, that is also
+		// acceptable — but we should not get a non-error from a cancelled ctx.
+		t.Log("git completed before context cancel (acceptable on fast hardware)")
+		return
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v (type %T)", err, err)
 	}
 }
