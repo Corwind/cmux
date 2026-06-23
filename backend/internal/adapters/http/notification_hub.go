@@ -16,6 +16,16 @@ type sessionNotificationMsg struct {
 	EventType   string `json:"event_type"`
 }
 
+// sessionStatusMsg is the JSON payload pushed when a session's lifecycle status
+// changes (e.g. provisioning → running, provisioning → failed).
+type sessionStatusMsg struct {
+	Type        string `json:"type"`
+	SessionID   string `json:"session_id"`
+	SessionName string `json:"session_name"`
+	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"`
+}
+
 const notificationDebounce = 30 * time.Second
 
 // debounceKey identifies a (session, eventType) pair for rate-limiting.
@@ -80,6 +90,30 @@ func (h *notificationHub) broadcast(n sessionNotificationMsg) {
 	}
 
 	data, err := json.Marshal(n)
+	if err != nil {
+		return
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for ch := range h.clients {
+		select {
+		case ch <- data:
+		default:
+		}
+	}
+}
+
+// BroadcastSessionStatus implements app.SessionEventBroadcaster. It serialises a
+// sessionStatusMsg and delivers it to every current subscriber without debouncing —
+// provisioning and failure events are always low-frequency and must never be dropped.
+func (h *notificationHub) BroadcastSessionStatus(sessionID, sessionName, status, errMsg string) {
+	data, err := json.Marshal(sessionStatusMsg{
+		Type:        "session_status",
+		SessionID:   sessionID,
+		SessionName: sessionName,
+		Status:      status,
+		Error:       errMsg,
+	})
 	if err != nil {
 		return
 	}
