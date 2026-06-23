@@ -1,6 +1,7 @@
 package git_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,7 +159,7 @@ func TestAddWorktree_NewBranch(t *testing.T) {
 	wtDir := t.TempDir()
 	wtPath := filepath.Join(wtDir, "new-branch-wt")
 
-	wt, err := svc.AddWorktree(repoDir, wtPath, "new-branch", "main", true)
+	wt, err := svc.AddWorktree(context.Background(), repoDir, wtPath, "new-branch", "main", true)
 	if err != nil {
 		t.Fatalf("AddWorktree (new branch) failed: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestAddWorktree_ExistingBranch(t *testing.T) {
 	wtDir := t.TempDir()
 	wtPath := filepath.Join(wtDir, "existing-branch-wt")
 
-	wt, err := svc.AddWorktree(repoDir, wtPath, "existing-branch", "", false)
+	wt, err := svc.AddWorktree(context.Background(), repoDir, wtPath, "existing-branch", "", false)
 	if err != nil {
 		t.Fatalf("AddWorktree (existing branch) failed: %v", err)
 	}
@@ -200,7 +201,7 @@ func TestAddWorktree_PathTraversal(t *testing.T) {
 	svc := git.NewService()
 	repoDir := setupRepo(t)
 
-	_, err := svc.AddWorktree(repoDir, "/tmp/../../evil", "branch", "main", true)
+	_, err := svc.AddWorktree(context.Background(), repoDir, "/tmp/../../evil", "branch", "main", true)
 	if err == nil {
 		t.Error("expected error for path traversal in worktree path")
 	}
@@ -210,7 +211,7 @@ func TestAddWorktree_BranchTraversal(t *testing.T) {
 	svc := git.NewService()
 	repoDir := setupRepo(t)
 
-	_, err := svc.AddWorktree(repoDir, "/tmp/safe", "../evil", "main", true)
+	_, err := svc.AddWorktree(context.Background(), repoDir, "/tmp/safe", "../evil", "main", true)
 	if err == nil {
 		t.Error("expected error for path traversal in branch name")
 	}
@@ -227,7 +228,7 @@ func TestRemoveWorktree_Clean(t *testing.T) {
 		t.Fatalf("git worktree add: %v\n%s", err, out)
 	}
 
-	if err := svc.RemoveWorktree(repoDir, wtPath, false); err != nil {
+	if err := svc.RemoveWorktree(context.Background(), repoDir, wtPath, false); err != nil {
 		t.Fatalf("RemoveWorktree failed: %v", err)
 	}
 
@@ -252,7 +253,7 @@ func TestRemoveWorktree_DirtyRejected(t *testing.T) {
 		t.Fatalf("write dirty file: %v", err)
 	}
 
-	err := svc.RemoveWorktree(repoDir, wtPath, false)
+	err := svc.RemoveWorktree(context.Background(), repoDir, wtPath, false)
 	if err == nil {
 		t.Fatal("expected error removing dirty worktree without force")
 	}
@@ -274,7 +275,7 @@ func TestRemoveWorktree_ForceRemovesDirty(t *testing.T) {
 		t.Fatalf("write dirty file: %v", err)
 	}
 
-	if err := svc.RemoveWorktree(repoDir, wtPath, true); err != nil {
+	if err := svc.RemoveWorktree(context.Background(), repoDir, wtPath, true); err != nil {
 		t.Fatalf("RemoveWorktree with force failed: %v", err)
 	}
 }
@@ -283,7 +284,7 @@ func TestIsClean_Clean(t *testing.T) {
 	svc := git.NewService()
 	repoDir := setupRepo(t)
 
-	clean, err := svc.IsClean(repoDir)
+	clean, err := svc.IsClean(context.Background(), repoDir)
 	if err != nil {
 		t.Fatalf("IsClean failed: %v", err)
 	}
@@ -300,7 +301,7 @@ func TestIsClean_Dirty(t *testing.T) {
 		t.Fatalf("write dirty file: %v", err)
 	}
 
-	clean, err := svc.IsClean(repoDir)
+	clean, err := svc.IsClean(context.Background(), repoDir)
 	if err != nil {
 		t.Fatalf("IsClean failed: %v", err)
 	}

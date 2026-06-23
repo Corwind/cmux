@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -134,7 +135,7 @@ func listBranches(repoRoot, currentBranch string) ([]ports.Branch, error) {
 	return branches, nil
 }
 
-func (s *Service) AddWorktree(repoRoot, worktreePath, branch, baseRef string, createBranch bool) (ports.Worktree, error) {
+func (s *Service) AddWorktree(ctx context.Context, repoRoot, worktreePath, branch, baseRef string, createBranch bool) (ports.Worktree, error) {
 	if err := validatePath(worktreePath); err != nil {
 		return ports.Worktree{}, fmt.Errorf("invalid worktree path: %w", err)
 	}
@@ -169,7 +170,7 @@ func (s *Service) AddWorktree(repoRoot, worktreePath, branch, baseRef string, cr
 	}, nil
 }
 
-func (s *Service) RemoveWorktree(repoRoot, worktreePath string, force bool) error {
+func (s *Service) RemoveWorktree(ctx context.Context, repoRoot, worktreePath string, force bool) error {
 	args := []string{"worktree", "remove"}
 	if force {
 		args = append(args, "--force")
@@ -182,7 +183,7 @@ func (s *Service) RemoveWorktree(repoRoot, worktreePath string, force bool) erro
 	return nil
 }
 
-func (s *Service) IsClean(worktreePath string) (bool, error) {
+func (s *Service) IsClean(ctx context.Context, worktreePath string) (bool, error) {
 	out, err := runGit(worktreePath, "status", "--porcelain")
 	if err != nil {
 		return false, fmt.Errorf("git status: %w", err)
