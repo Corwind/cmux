@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 )
@@ -242,5 +243,61 @@ func TestNotificationHub_DebounceDeduplicates(t *testing.T) {
 			}
 			return
 		}
+	}
+}
+
+func TestBroadcastSessionStatus_SendsToAllSubscribers(t *testing.T) {
+	hub := newNotificationHub()
+
+	ch1, unsub1 := hub.subscribe()
+	ch2, unsub2 := hub.subscribe()
+	defer unsub1()
+	defer unsub2()
+
+	hub.BroadcastSessionStatus("s1", "My Session", "running", "")
+
+	for _, ch := range []<-chan []byte{ch1, ch2} {
+		select {
+		case data := <-ch:
+			if len(data) == 0 {
+				t.Fatal("expected non-empty data from subscriber")
+			}
+		default:
+			t.Fatal("expected data to be delivered to subscriber")
+		}
+	}
+}
+
+func TestBroadcastSessionStatus_TypeFieldIsSessionStatus(t *testing.T) {
+	hub := newNotificationHub()
+
+	ch, unsub := hub.subscribe()
+	defer unsub()
+
+	hub.BroadcastSessionStatus("s1", "My Session", "failed", "worktree creation failed")
+
+	select {
+	case data := <-ch:
+		var msg sessionStatusMsg
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Fatalf("failed to unmarshal message: %v", err)
+		}
+		if msg.Type != "session_status" {
+			t.Errorf("expected type %q, got %q", "session_status", msg.Type)
+		}
+		if msg.SessionID != "s1" {
+			t.Errorf("expected session_id %q, got %q", "s1", msg.SessionID)
+		}
+		if msg.SessionName != "My Session" {
+			t.Errorf("expected session_name %q, got %q", "My Session", msg.SessionName)
+		}
+		if msg.Status != "failed" {
+			t.Errorf("expected status %q, got %q", "failed", msg.Status)
+		}
+		if msg.Error != "worktree creation failed" {
+			t.Errorf("expected error %q, got %q", "worktree creation failed", msg.Error)
+		}
+	default:
+		t.Fatal("expected data to be delivered to subscriber")
 	}
 }
