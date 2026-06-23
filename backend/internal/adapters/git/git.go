@@ -2,12 +2,12 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/Corwind/cmux/backend/internal/ports"
 )
@@ -19,34 +19,35 @@ func NewService() *Service {
 }
 
 func (s *Service) Info(path string) (ports.GitInfo, error) {
+	ctx := context.Background()
 	// Check if inside a work tree
-	out, err := runGit(path, "rev-parse", "--is-inside-work-tree")
+	out, err := runGit(ctx, path, "rev-parse", "--is-inside-work-tree")
 	if err != nil || strings.TrimSpace(string(out)) != "true" {
 		return ports.GitInfo{IsRepo: false}, nil
 	}
 
 	// Get repo root
-	rootOut, err := runGit(path, "rev-parse", "--show-toplevel")
+	rootOut, err := runGit(ctx, path, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return ports.GitInfo{IsRepo: false}, nil
 	}
 	repoRoot := strings.TrimSpace(string(rootOut))
 
 	// Get current branch
-	branchOut, err := runGit(path, "rev-parse", "--abbrev-ref", "HEAD")
+	branchOut, err := runGit(ctx, path, "rev-parse", "--abbrev-ref", "HEAD")
 	currentBranch := ""
 	if err == nil {
 		currentBranch = strings.TrimSpace(string(branchOut))
 	}
 
 	// List worktrees
-	worktrees, err := listWorktrees(repoRoot)
+	worktrees, err := listWorktrees(ctx, repoRoot)
 	if err != nil {
 		worktrees = nil
 	}
 
 	// List local branches
-	branches, err := listBranches(repoRoot, currentBranch)
+	branches, err := listBranches(ctx, repoRoot, currentBranch)
 	if err != nil {
 		branches = nil
 	}
@@ -60,8 +61,8 @@ func (s *Service) Info(path string) (ports.GitInfo, error) {
 	}, nil
 }
 
-func listWorktrees(repoRoot string) ([]ports.Worktree, error) {
-	out, err := runGit(repoRoot, "worktree", "list", "--porcelain")
+func listWorktrees(ctx context.Context, repoRoot string) ([]ports.Worktree, error) {
+	out, err := runGit(ctx, repoRoot, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
@@ -110,8 +111,8 @@ func listWorktrees(repoRoot string) ([]ports.Worktree, error) {
 	return worktrees, nil
 }
 
-func listBranches(repoRoot, currentBranch string) ([]ports.Branch, error) {
-	out, err := runGit(repoRoot, "for-each-ref", "--format=%(refname:short) %(HEAD)", "refs/heads")
+func listBranches(ctx context.Context, repoRoot, currentBranch string) ([]ports.Branch, error) {
+	out, err := runGit(ctx, repoRoot, "for-each-ref", "--format=%(refname:short) %(HEAD)", "refs/heads")
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +135,7 @@ func listBranches(repoRoot, currentBranch string) ([]ports.Branch, error) {
 	return branches, nil
 }
 
-func (s *Service) AddWorktree(repoRoot, worktreePath, branch, baseRef string, createBranch bool) (ports.Worktree, error) {
+func (s *Service) AddWorktree(ctx context.Context, repoRoot, worktreePath, branch, baseRef string, createBranch bool) (ports.Worktree, error) {
 	if err := validatePath(worktreePath); err != nil {
 		return ports.Worktree{}, fmt.Errorf("invalid worktree path: %w", err)
 	}
@@ -156,12 +157,12 @@ func (s *Service) AddWorktree(repoRoot, worktreePath, branch, baseRef string, cr
 		args = []string{"worktree", "add", worktreePath, branch}
 	}
 
-	if _, err := runGit(repoRoot, args...); err != nil {
+	if _, err := runGit(ctx, repoRoot, args...); err != nil {
 		return ports.Worktree{}, fmt.Errorf("git worktree add: %w", err)
 	}
 
 	// Resolve head after add
-	headOut, _ := runGit(worktreePath, "rev-parse", "HEAD")
+	headOut, _ := runGit(ctx, worktreePath, "rev-parse", "HEAD")
 	return ports.Worktree{
 		Path:   worktreePath,
 		Branch: branch,
@@ -169,28 +170,28 @@ func (s *Service) AddWorktree(repoRoot, worktreePath, branch, baseRef string, cr
 	}, nil
 }
 
-func (s *Service) RemoveWorktree(repoRoot, worktreePath string, force bool) error {
+func (s *Service) RemoveWorktree(ctx context.Context, repoRoot, worktreePath string, force bool) error {
 	args := []string{"worktree", "remove"}
 	if force {
 		args = append(args, "--force")
 	}
 	args = append(args, worktreePath)
 
-	if _, err := runGit(repoRoot, args...); err != nil {
+	if _, err := runGit(ctx, repoRoot, args...); err != nil {
 		return fmt.Errorf("git worktree remove: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) IsClean(worktreePath string) (bool, error) {
-	out, err := runGit(worktreePath, "status", "--porcelain")
+func (s *Service) IsClean(ctx context.Context, worktreePath string) (bool, error) {
+	out, err := runGit(ctx, worktreePath, "status", "--porcelain")
 	if err != nil {
 		return false, fmt.Errorf("git status: %w", err)
 	}
 	return strings.TrimSpace(string(out)) == "", nil
 }
 
-func runGit(dir string, args ...string) ([]byte, error) {
+func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Stdin = nil
 
@@ -214,9 +215,9 @@ func runGit(dir string, args ...string) ([]byte, error) {
 			return nil, fmt.Errorf("%s", msg)
 		}
 		return stdout.Bytes(), nil
-	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
 		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("git command timed out after 10s")
+		return nil, ctx.Err()
 	}
 }
 

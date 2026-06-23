@@ -1,5 +1,7 @@
 package ports
 
+import "context"
+
 type Worktree struct {
 	Path     string
 	Branch   string
@@ -25,7 +27,7 @@ type GitInfo struct {
 
 type GitService interface {
 	Info(path string) (GitInfo, error)
-	AddWorktree(repoRoot, worktreePath, branch, baseRef string, createBranch bool) (Worktree, error)
-	RemoveWorktree(repoRoot, worktreePath string, force bool) error
-	IsClean(worktreePath string) (bool, error)
+	AddWorktree(ctx context.Context, repoRoot, worktreePath, branch, baseRef string, createBranch bool) (Worktree, error)
+	RemoveWorktree(ctx context.Context, repoRoot, worktreePath string, force bool) error
+	IsClean(ctx context.Context, worktreePath string) (bool, error)
 }
