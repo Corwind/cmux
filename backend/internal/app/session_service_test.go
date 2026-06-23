@@ -158,20 +158,6 @@ func (m *mockProcessManager) killPIDsSafe() []int {
 	return result
 }
 
-// nextPIDSafe returns nextPID safely.
-func (m *mockProcessManager) nextPIDSafe() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.nextPID
-}
-
-// doneChans returns a copy of the done channel for the given PID safely.
-func (m *mockProcessManager) getDoneChan(pid int) chan error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.doneChans[pid]
-}
-
 // --- Mock ProcessManager with SandboxContentProvider ---
 
 type mockSandboxProcessManager struct {
@@ -242,24 +228,6 @@ func (m *mockGitService) IsClean(ctx context.Context, path string) (bool, error)
 		return m.isCleanFn(ctx, path)
 	}
 	return true, nil
-}
-
-// removedWorktreesSafe returns a safe copy of removedWorktrees.
-func (m *mockGitService) removedWorktreesSafe() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	result := make([]string, len(m.removedWorktrees))
-	copy(result, m.removedWorktrees)
-	return result
-}
-
-// forceFlagsSafe returns a safe copy of forceFlags.
-func (m *mockGitService) forceFlagsSafe() []bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	result := make([]bool, len(m.forceFlags))
-	copy(result, m.forceFlags)
-	return result
 }
 
 // --- Helper ---
