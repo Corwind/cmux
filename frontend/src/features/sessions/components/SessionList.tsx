@@ -57,11 +57,20 @@ export function SessionList() {
         <li key={session.id}>
           <button
             type="button"
+            disabled={
+              session.status === "provisioning" ||
+              session.status === "failed"
+            }
             onClick={() => {
+              if (
+                session.status === "provisioning" ||
+                session.status === "failed"
+              )
+                return;
               setActiveSession(session.id);
               useNotificationStore.getState().clearNotification(session.id);
             }}
-            className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors"
+            className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60"
             style={{
               backgroundColor:
                 activeSessionId === session.id
@@ -73,7 +82,11 @@ export function SessionList() {
                   : "var(--cmux-text-secondary)",
             }}
             onMouseEnter={(e) => {
-              if (activeSessionId !== session.id) {
+              if (
+                activeSessionId !== session.id &&
+                session.status !== "provisioning" &&
+                session.status !== "failed"
+              ) {
                 e.currentTarget.style.backgroundColor =
                   "var(--cmux-surface-hover)";
                 e.currentTarget.style.color = "var(--cmux-text)";
@@ -91,12 +104,22 @@ export function SessionList() {
                 {session.name}
                 {session.git_branch && <BranchBadge branch={session.git_branch} />}
               </div>
-              <div
-                className="truncate text-xs"
-                style={{ color: "var(--cmux-text-muted)" }}
-              >
-                {session.working_dir}
-              </div>
+              {session.status === "provisioning" ? (
+                <div className="truncate text-xs text-blue-400">
+                  Creating worktree...
+                </div>
+              ) : session.status === "failed" ? (
+                <div className="truncate text-xs text-red-400">
+                  {session.error ?? "Provisioning failed"}
+                </div>
+              ) : (
+                <div
+                  className="truncate text-xs"
+                  style={{ color: "var(--cmux-text-muted)" }}
+                >
+                  {session.working_dir}
+                </div>
+              )}
             </div>
             <div className="ml-2 flex items-center gap-2">
               <StatusBadge status={session.status} hasNotification={notifications[session.id]?.eventType === "waiting_input"} />
@@ -174,39 +197,44 @@ export function SessionList() {
                   </svg>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(session);
-                }}
-                className="rounded p-0.5 transition-colors"
-                style={{ color: "var(--cmux-text-muted)" }}
-                title="Delete session"
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor =
-                    "var(--cmux-surface-hover)";
-                  e.currentTarget.style.color = "#f87171";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "";
-                  e.currentTarget.style.color = "var(--cmux-text-muted)";
-                }}
-              >
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
+              {(session.status === "provisioning" ||
+                session.status === "failed" ||
+                session.status === "stopped" ||
+                session.status === "running") && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(session);
+                  }}
+                  className="rounded p-0.5 transition-colors"
+                  style={{ color: "var(--cmux-text-muted)" }}
+                  title="Delete session"
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor =
+                      "var(--cmux-surface-hover)";
+                    e.currentTarget.style.color = "#f87171";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "";
+                    e.currentTarget.style.color = "var(--cmux-text-muted)";
+                  }}
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              )}
             </div>
           </button>
         </li>
