@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { SessionList, CreateSessionDialog, WorktreePanel, useSessionsStore } from "@/features/sessions";
+import { SessionList, CreateSessionDialog, WorktreePanel, useSessionsStore, useSessions } from "@/features/sessions";
 import { TemplateManager } from "@/features/templates";
 import { Terminal } from "@/features/terminal";
 
 export function HomePage() {
   const activeSessionId = useSessionsStore((s) => s.activeSessionId);
+  const { data: sessions } = useSessions();
+  const activeSession = sessions?.find((s) => s.id === activeSessionId);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [worktreesOpen, setWorktreesOpen] = useState(true);
 
@@ -74,7 +76,16 @@ export function HomePage() {
         </>
       }
     >
-      {activeSessionId ? (
+      {activeSessionId && activeSession?.status === "provisioning" ? (
+        <div className="flex h-full items-center justify-center">
+          <div className="text-center" style={{ color: "var(--cmux-text-muted)" }}>
+            <div className="mb-3 flex justify-center">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+            </div>
+            <p className="text-sm">Creating worktree…</p>
+          </div>
+        </div>
+      ) : activeSessionId ? (
         <Terminal key={activeSessionId} sessionId={activeSessionId} />
       ) : (
         <div className="flex h-full items-center justify-center">
