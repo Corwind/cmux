@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { renderHook, waitFor } from "@/test/test-utils";
 import { useNotificationWebSocket } from "./useNotificationWebSocket";
 import { useNotificationStore } from "../stores/notification.store";
+import { queryClient } from "@/config/query-client";
 
 // ---------------------------------------------------------------------------
 // Minimal WebSocket mock
@@ -22,10 +23,13 @@ class MockWebSocket implements WsHandler {
   onclose: (() => void) | null = null;
   readyState = 1; // OPEN
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   constructor(_url: string) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     currentWs = this;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   send(_data: string) {}
 
   close() {
@@ -35,33 +39,24 @@ class MockWebSocket implements WsHandler {
 }
 
 // ---------------------------------------------------------------------------
-// Mock QueryClient (for session_status invalidation tests)
-// ---------------------------------------------------------------------------
-
-const mockInvalidateQueries = vi.fn();
-
-vi.mock("@tanstack/react-query", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@tanstack/react-query")>();
-  return {
-    ...actual,
-    useQueryClient: () => ({ invalidateQueries: mockInvalidateQueries }),
-  };
-});
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("useNotificationWebSocket", () => {
+  // biome-ignore lint: spy type is complex
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let invalidateSpy: any;
+
   beforeEach(() => {
     vi.stubGlobal("WebSocket", MockWebSocket);
     useNotificationStore.setState({ notifications: {} });
-    mockInvalidateQueries.mockClear();
+    invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     currentWs = null;
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    invalidateSpy.mockRestore();
   });
 
   function sendMessage(data: unknown) {
@@ -101,7 +96,7 @@ describe("useNotificationWebSocket", () => {
     });
 
     await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith(
+      expect(invalidateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ queryKey: expect.arrayContaining(["sessions"]) }),
       );
     });
@@ -120,7 +115,7 @@ describe("useNotificationWebSocket", () => {
     });
 
     await waitFor(() => {
-      expect(mockInvalidateQueries).toHaveBeenCalledWith(
+      expect(invalidateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ queryKey: expect.arrayContaining(["sessions"]) }),
       );
     });
@@ -152,7 +147,7 @@ describe("useNotificationWebSocket", () => {
       expect(notifications["session-2"]).toBeDefined();
 
       // invalidateQueries should have been called for the second message
-      expect(mockInvalidateQueries).toHaveBeenCalledWith(
+      expect(invalidateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ queryKey: expect.arrayContaining(["sessions"]) }),
       );
     });

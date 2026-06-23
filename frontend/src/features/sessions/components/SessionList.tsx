@@ -110,7 +110,7 @@ export function SessionList() {
                 </div>
               ) : session.status === "failed" ? (
                 <div className="truncate text-xs text-red-400">
-                  {session.error ?? "Provisioning failed"}
+                  {session.error_message ?? "Provisioning failed"}
                 </div>
               ) : (
                 <div

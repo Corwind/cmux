@@ -9,7 +9,7 @@ interface StatusBadgeProps {
 export function StatusBadge({ status, hasNotification }: StatusBadgeProps) {
   function ariaLabel() {
     if (hasNotification) return "needs attention";
-    if (status === "provisioning") return "creating worktree";
+    if (status === "provisioning") return "provisioning";
     return status;
   }
 
@@ -21,7 +21,7 @@ export function StatusBadge({ status, hasNotification }: StatusBadgeProps) {
         "bg-gray-500": !hasNotification && status === "stopped",
         "animate-pulse bg-blue-400":
           !hasNotification && status === "provisioning",
-        "bg-red-500": !hasNotification && status === "failed",
+        "bg-red-400": !hasNotification && status === "failed",
       })}
       aria-label={ariaLabel()}
     />

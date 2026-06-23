@@ -9,7 +9,7 @@ export interface Session {
   repo_root?: string;
   git_branch?: string;
   worktree_managed?: boolean;
-  error?: string;
+  error_message?: string;
   created_at: string;
   updated_at: string;
 }
