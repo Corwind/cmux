@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
 	"github.com/Corwind/cmux/backend/internal/ports"
@@ -137,9 +140,9 @@ func (m *mockSandboxProcessManager) SetSandboxContent(contents []string) {
 
 type mockGitService struct {
 	infoFn           func(path string) (ports.GitInfo, error)
-	addWorktreeFn    func(repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error)
-	removeWorktreeFn func(repoRoot, wtPath string, force bool) error
-	isCleanFn        func(path string) (bool, error)
+	addWorktreeFn    func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error)
+	removeWorktreeFn func(ctx context.Context, repoRoot, wtPath string, force bool) error
+	isCleanFn        func(ctx context.Context, path string) (bool, error)
 	removedWorktrees []string
 	forceFlags       []bool
 }
@@ -159,25 +162,25 @@ func (m *mockGitService) Info(path string) (ports.GitInfo, error) {
 	}, nil
 }
 
-func (m *mockGitService) AddWorktree(repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+func (m *mockGitService) AddWorktree(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
 	if m.addWorktreeFn != nil {
-		return m.addWorktreeFn(repoRoot, wtPath, branch, baseRef, create)
+		return m.addWorktreeFn(ctx, repoRoot, wtPath, branch, baseRef, create)
 	}
 	return ports.Worktree{Path: wtPath, Branch: branch}, nil
 }
 
-func (m *mockGitService) RemoveWorktree(repoRoot, wtPath string, force bool) error {
+func (m *mockGitService) RemoveWorktree(ctx context.Context, repoRoot, wtPath string, force bool) error {
 	m.removedWorktrees = append(m.removedWorktrees, wtPath)
 	m.forceFlags = append(m.forceFlags, force)
 	if m.removeWorktreeFn != nil {
-		return m.removeWorktreeFn(repoRoot, wtPath, force)
+		return m.removeWorktreeFn(ctx, repoRoot, wtPath, force)
 	}
 	return nil
 }
 
-func (m *mockGitService) IsClean(path string) (bool, error) {
+func (m *mockGitService) IsClean(ctx context.Context, path string) (bool, error) {
 	if m.isCleanFn != nil {
-		return m.isCleanFn(path)
+		return m.isCleanFn(ctx, path)
 	}
 	return true, nil
 }
@@ -816,6 +819,10 @@ func TestCreateSession_WithWorktree_SetsFields(t *testing.T) {
 	if !session.WorktreeManaged {
 		t.Error("expected WorktreeManaged=true")
 	}
+	// Async path: session is returned immediately with StatusProvisioning
+	if session.Status != domain.StatusProvisioning {
+		t.Errorf("expected status provisioning for async worktree session, got %q", session.Status)
+	}
 }
 
 func TestCreateSession_WithWorktree_ComputesDefaultPath(t *testing.T) {
@@ -825,9 +832,9 @@ func TestCreateSession_WithWorktree_ComputesDefaultPath(t *testing.T) {
 	git.infoFn = func(path string) (ports.GitInfo, error) {
 		return ports.GitInfo{IsRepo: true, RepoRoot: "/Users/user/myrepo", CurrentBranch: "main"}, nil
 	}
-	var capturedPath string
-	git.addWorktreeFn = func(repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
-		capturedPath = wtPath
+	pathCh := make(chan string, 1)
+	git.addWorktreeFn = func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+		pathCh <- wtPath
 		return ports.Worktree{Path: wtPath, Branch: branch}, nil
 	}
 
@@ -844,6 +851,8 @@ func TestCreateSession_WithWorktree_ComputesDefaultPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// Wait for the async goroutine to call AddWorktree
+	capturedPath := <-pathCh
 	// Path should be worktreesDir/repoBase/sanitizedBranch
 	expected := "/wt/myrepo/feat-foo"
 	if capturedPath != expected {
@@ -873,6 +882,10 @@ func TestCreateSession_WithWorktree_NotRepo(t *testing.T) {
 	}
 }
 
+// TestCreateSession_WithWorktree_SpawnFailureCleansUp is now covered by
+// TestProvisionWorktree_SpawnFails_UpdatesSessionToFailedAndCleansWorktree below.
+// This test keeps a smoke-check that CreateSession itself succeeds (returns provisioning),
+// and the async goroutine does the cleanup — tested via the dedicated provision tests.
 func TestCreateSession_WithWorktree_SpawnFailureCleansUp(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
@@ -880,7 +893,7 @@ func TestCreateSession_WithWorktree_SpawnFailureCleansUp(t *testing.T) {
 	git := newMockGitService()
 	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/tmp/worktrees"))
 
-	_, err := svc.CreateSession(context.Background(), CreateSessionInput{
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
 		WorkingDir: "/repo",
 		Worktree: &WorktreeSpec{
 			RepoPath:     "/repo",
@@ -889,12 +902,12 @@ func TestCreateSession_WithWorktree_SpawnFailureCleansUp(t *testing.T) {
 			CreateBranch: true,
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error when spawn fails")
+	// Async path: CreateSession returns immediately with StatusProvisioning, no error
+	if err != nil {
+		t.Fatalf("expected no error from CreateSession (async path), got %v", err)
 	}
-	// Worktree should have been cleaned up (force removed)
-	if len(git.removedWorktrees) == 0 {
-		t.Error("expected orphaned worktree to be cleaned up on spawn failure")
+	if session.Status != domain.StatusProvisioning {
+		t.Errorf("expected StatusProvisioning, got %q", session.Status)
 	}
 }
 
@@ -922,4 +935,351 @@ func TestDeleteSession_DoesNotRemoveWorktree(t *testing.T) {
 	if len(git.removedWorktrees) != 0 {
 		t.Error("expected worktree to NOT be removed by DeleteSession")
 	}
+}
+
+// --- Mock SessionEventBroadcaster ---
+
+type mockBroadcaster struct {
+	mu     sync.Mutex
+	events []broadcastEvent
+	ch     chan broadcastEvent
+}
+
+type broadcastEvent struct {
+	sessionID string
+	name      string
+	status    string
+	errMsg    string
+}
+
+func newMockBroadcaster() *mockBroadcaster {
+	return &mockBroadcaster{ch: make(chan broadcastEvent, 10)}
+}
+
+func (m *mockBroadcaster) BroadcastSessionStatus(sessionID, name, status, errMsg string) {
+	evt := broadcastEvent{sessionID: sessionID, name: name, status: status, errMsg: errMsg}
+	m.mu.Lock()
+	m.events = append(m.events, evt)
+	m.mu.Unlock()
+	m.ch <- evt
+}
+
+func (m *mockBroadcaster) waitForEvent(t *testing.T, timeout time.Duration) broadcastEvent {
+	t.Helper()
+	select {
+	case evt := <-m.ch:
+		return evt
+	case <-time.After(timeout):
+		t.Fatal("timed out waiting for broadcaster event")
+		return broadcastEvent{}
+	}
+}
+
+// --- waitForSessionStatus polls the repo until the session reaches the expected status ---
+
+func waitForSessionStatus(t *testing.T, repo *mockRepo, sessionID string, want domain.SessionStatus, timeout time.Duration) domain.Session {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		s, err := repo.Get(context.Background(), sessionID)
+		if err == nil && s.Status == want {
+			return s
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s, _ := repo.Get(context.Background(), sessionID)
+	t.Fatalf("timed out waiting for session %s to reach status %q (got %q)", sessionID, want, s.Status)
+	return domain.Session{}
+}
+
+// --- Async provisioning behaviour tests ---
+
+// TestCreateSession_AsyncWorktree_ReturnsProvisioningImmediately verifies that
+// when a worktree spec is given, CreateSession persists the session with
+// StatusProvisioning and returns immediately without waiting for git or process.
+func TestCreateSession_AsyncWorktree_ReturnsProvisioningImmediately(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+
+	// Block AddWorktree until we assert the provisioning status
+	addStarted := make(chan struct{})
+	addUnblock := make(chan struct{})
+	git.addWorktreeFn = func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+		close(addStarted)
+		<-addUnblock
+		return ports.Worktree{Path: wtPath, Branch: branch}, nil
+	}
+
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/wt"))
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "async-session",
+		WorkingDir: "/repo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/repo",
+			Branch:       "feat/async",
+			CreateBranch: true,
+			Path:         "/wt/repo/feat-async",
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if session.Status != domain.StatusProvisioning {
+		t.Errorf("expected StatusProvisioning, got %q", session.Status)
+	}
+	// Session must already be in the repo
+	stored, err := repo.Get(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("session not stored in repo: %v", err)
+	}
+	if stored.Status != domain.StatusProvisioning {
+		t.Errorf("expected stored status provisioning, got %q", stored.Status)
+	}
+
+	// Unblock the goroutine to let it finish cleanly
+	close(addUnblock)
+	<-addStarted // ensure it started before we unblock
+}
+
+// TestProvisionWorktree_Success_UpdatesSessionToRunning verifies the happy path:
+// the goroutine creates the worktree, spawns the process, and transitions the
+// session to StatusRunning, then broadcasts the new status.
+func TestProvisionWorktree_Success_UpdatesSessionToRunning(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	broadcaster := newMockBroadcaster()
+
+	svc := NewSessionService(repo, pm, nil,
+		WithGitService(git, "/wt"),
+		WithBroadcaster(broadcaster),
+	)
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "prov-success",
+		WorkingDir: "/repo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/repo",
+			Branch:       "feat/success",
+			CreateBranch: true,
+			Path:         "/wt/repo/feat-success",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if session.Status != domain.StatusProvisioning {
+		t.Fatalf("expected StatusProvisioning, got %q", session.Status)
+	}
+
+	// Wait for the broadcaster to fire a "running" event
+	evt := broadcaster.waitForEvent(t, 2*time.Second)
+	if evt.sessionID != session.ID {
+		t.Errorf("expected event for session %s, got %s", session.ID, evt.sessionID)
+	}
+	if evt.status != string(domain.StatusRunning) {
+		t.Errorf("expected broadcast status running, got %q", evt.status)
+	}
+	if evt.errMsg != "" {
+		t.Errorf("expected empty errMsg, got %q", evt.errMsg)
+	}
+
+	// Session must be running in the repo
+	stored := waitForSessionStatus(t, repo, session.ID, domain.StatusRunning, 2*time.Second)
+	if stored.PID == 0 {
+		t.Error("expected PID to be set after successful provisioning")
+	}
+	if stored.Error != "" {
+		t.Errorf("expected empty Error field, got %q", stored.Error)
+	}
+}
+
+// TestProvisionWorktree_AddWorktreeFails_UpdatesSessionToFailed verifies that
+// when AddWorktree returns an error the session is transitioned to StatusFailed
+// with a descriptive error message and the failure is broadcast.
+func TestProvisionWorktree_AddWorktreeFails_UpdatesSessionToFailed(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	broadcaster := newMockBroadcaster()
+
+	git.addWorktreeFn = func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+		return ports.Worktree{}, errors.New("git conflict")
+	}
+
+	svc := NewSessionService(repo, pm, nil,
+		WithGitService(git, "/wt"),
+		WithBroadcaster(broadcaster),
+	)
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "prov-fail-wt",
+		WorkingDir: "/repo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/repo",
+			Branch:       "feat/fail",
+			CreateBranch: true,
+			Path:         "/wt/repo/feat-fail",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error from CreateSession: %v", err)
+	}
+
+	// Wait for the failure broadcast
+	evt := broadcaster.waitForEvent(t, 2*time.Second)
+	if evt.status != string(domain.StatusFailed) {
+		t.Errorf("expected broadcast status failed, got %q", evt.status)
+	}
+	if evt.errMsg == "" {
+		t.Error("expected non-empty errMsg in failure broadcast")
+	}
+
+	// Session in repo must be StatusFailed with Error set
+	stored := waitForSessionStatus(t, repo, session.ID, domain.StatusFailed, 2*time.Second)
+	if stored.Error == "" {
+		t.Error("expected Error field to be set on failed session")
+	}
+	if !contains(stored.Error, "git conflict") {
+		t.Errorf("expected error to mention git conflict, got %q", stored.Error)
+	}
+	// No process should have been spawned
+	if len(pm.killPIDs) != 0 || pm.nextPID != 42 {
+		t.Error("expected no process to be spawned when AddWorktree fails")
+	}
+}
+
+// TestProvisionWorktree_SpawnFails_UpdatesSessionToFailedAndCleansWorktree verifies
+// that when Spawn fails after a successful AddWorktree, the worktree is removed
+// and the session is transitioned to StatusFailed.
+func TestProvisionWorktree_SpawnFails_UpdatesSessionToFailedAndCleansWorktree(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	pm.spawnErr = fmt.Errorf("spawn failed")
+	git := newMockGitService()
+	broadcaster := newMockBroadcaster()
+
+	svc := NewSessionService(repo, pm, nil,
+		WithGitService(git, "/wt"),
+		WithBroadcaster(broadcaster),
+	)
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "spawn-fail",
+		WorkingDir: "/repo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/repo",
+			Branch:       "feat/spawn-fail",
+			CreateBranch: true,
+			Path:         "/wt/repo/feat-spawn-fail",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error from CreateSession: %v", err)
+	}
+
+	// Wait for failure broadcast
+	evt := broadcaster.waitForEvent(t, 2*time.Second)
+	if evt.status != string(domain.StatusFailed) {
+		t.Errorf("expected broadcast status failed, got %q", evt.status)
+	}
+
+	// Session must be failed
+	stored := waitForSessionStatus(t, repo, session.ID, domain.StatusFailed, 2*time.Second)
+	if !contains(stored.Error, "spawn process") {
+		t.Errorf("expected spawn error message, got %q", stored.Error)
+	}
+
+	// Worktree must have been cleaned up (force removed)
+	if len(git.removedWorktrees) == 0 {
+		t.Error("expected orphaned worktree to be cleaned up on spawn failure")
+	}
+	if !git.forceFlags[0] {
+		t.Error("expected force=true when cleaning up orphaned worktree")
+	}
+}
+
+// TestDeleteSession_CancelsInFlightProvision verifies that deleting a
+// provisioning session cancels the in-flight goroutine context.
+func TestDeleteSession_CancelsInFlightProvision(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+
+	// AddWorktree will block until context is cancelled
+	ctxCancelled := make(chan struct{})
+	git.addWorktreeFn = func(ctx context.Context, repoRoot, wtPath, branch, baseRef string, create bool) (ports.Worktree, error) {
+		<-ctx.Done()
+		close(ctxCancelled)
+		return ports.Worktree{}, ctx.Err()
+	}
+
+	svc := NewSessionService(repo, pm, nil, WithGitService(git, "/wt"))
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "cancel-prov",
+		WorkingDir: "/repo",
+		Worktree: &WorktreeSpec{
+			RepoPath:     "/repo",
+			Branch:       "feat/cancel",
+			CreateBranch: true,
+			Path:         "/wt/repo/feat-cancel",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error from CreateSession: %v", err)
+	}
+
+	// Delete the session while it is provisioning
+	if err := svc.DeleteSession(context.Background(), session.ID); err != nil {
+		t.Fatalf("unexpected error from DeleteSession: %v", err)
+	}
+
+	// The goroutine's context must be cancelled
+	select {
+	case <-ctxCancelled:
+		// good
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out: provisioning goroutine context was not cancelled on DeleteSession")
+	}
+}
+
+// TestGetPTYHandle_ProvisioningSession_ReturnsError verifies that trying to get
+// a PTY handle for a session that is still provisioning returns ErrSessionProvisioning.
+func TestGetPTYHandle_ProvisioningSession_ReturnsError(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm, nil)
+
+	// Insert a session in provisioning state directly
+	sess := domain.Session{
+		ID:         "sess-prov",
+		Name:       "prov",
+		WorkingDir: "/tmp/wt",
+		Status:     domain.StatusProvisioning,
+	}
+	_ = repo.Create(context.Background(), sess)
+
+	_, err := svc.GetPTYHandle("sess-prov")
+	if err == nil {
+		t.Fatal("expected error for provisioning session")
+	}
+	if !errors.Is(err, ErrSessionProvisioning) {
+		t.Errorf("expected ErrSessionProvisioning, got %v", err)
+	}
+}
+
+// contains is a helper to check if a string contains a substring.
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
+		func() bool {
+			for i := 0; i <= len(s)-len(sub); i++ {
+				if s[i:i+len(sub)] == sub {
+					return true
+				}
+			}
+			return false
+		}())
 }
