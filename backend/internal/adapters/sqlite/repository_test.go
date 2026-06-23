@@ -215,6 +215,144 @@ func TestRepository_WorktreeFieldsIdempotentMigration(t *testing.T) {
 	_ = repo2
 }
 
+func TestRepository_ErrorFieldRoundTrip(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	s := makeSession("err-sess")
+	s.Status = domain.StatusFailed
+	s.Error = "git worktree add failed: branch already exists"
+
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := repo.Get(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Error != s.Error {
+		t.Errorf("Error: expected %q, got %q", s.Error, got.Error)
+	}
+	if got.Status != domain.StatusFailed {
+		t.Errorf("Status: expected %q, got %q", domain.StatusFailed, got.Status)
+	}
+}
+
+func TestRepository_ErrorFieldDefaultsEmpty(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	s := makeSession("no-err-sess")
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := repo.Get(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Error != "" {
+		t.Errorf("expected empty Error field, got %q", got.Error)
+	}
+}
+
+func TestRepository_ProvisioningStatusRoundTrip(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	s := makeSession("prov-sess")
+	s.Status = domain.StatusProvisioning
+
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := repo.Get(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Status != domain.StatusProvisioning {
+		t.Errorf("Status: expected %q, got %q", domain.StatusProvisioning, got.Status)
+	}
+}
+
+func TestRepository_UpdateErrorField(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	s := makeSession("update-err-sess")
+	s.Status = domain.StatusProvisioning
+
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	s.Status = domain.StatusFailed
+	s.Error = "provisioning timed out"
+	if err := repo.Update(ctx, s); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	got, err := repo.Get(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Status != domain.StatusFailed {
+		t.Errorf("Status: expected %q, got %q", domain.StatusFailed, got.Status)
+	}
+	if got.Error != "provisioning timed out" {
+		t.Errorf("Error: expected %q, got %q", "provisioning timed out", got.Error)
+	}
+}
+
+func TestRepository_ErrorFieldInList(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	s1 := makeSession("list-err-1")
+	s1.Status = domain.StatusFailed
+	s1.Error = "some error"
+
+	s2 := makeSession("list-err-2")
+	s2.Status = domain.StatusProvisioning
+
+	if err := repo.Create(ctx, s1); err != nil {
+		t.Fatalf("Create s1 failed: %v", err)
+	}
+	if err := repo.Create(ctx, s2); err != nil {
+		t.Fatalf("Create s2 failed: %v", err)
+	}
+
+	sessions, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(sessions))
+	}
+
+	// Find sessions by name since list order might vary
+	for _, sess := range sessions {
+		switch sess.Name {
+		case "list-err-1":
+			if sess.Error != "some error" {
+				t.Errorf("list-err-1: expected Error %q, got %q", "some error", sess.Error)
+			}
+			if sess.Status != domain.StatusFailed {
+				t.Errorf("list-err-1: expected status %q, got %q", domain.StatusFailed, sess.Status)
+			}
+		case "list-err-2":
+			if sess.Error != "" {
+				t.Errorf("list-err-2: expected empty Error, got %q", sess.Error)
+			}
+			if sess.Status != domain.StatusProvisioning {
+				t.Errorf("list-err-2: expected status %q, got %q", domain.StatusProvisioning, sess.Status)
+			}
+		}
+	}
+}
+
 func TestRepository_ListOrderByCreatedAtDesc(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
