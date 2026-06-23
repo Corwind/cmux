@@ -2,7 +2,8 @@ export interface Session {
   id: string;
   name: string;
   working_dir: string;
-  status: "running" | "stopped";
+  status: "running" | "stopped" | "provisioning" | "failed";
+  error?: string;
   pid: number;
   template_id: string;
   skip_permissions: boolean;
@@ -42,5 +43,5 @@ export interface WorktreeEntry {
   created_at: string;
   session_id?: string;
   session_name?: string;
-  session_status?: "running" | "stopped";
+  session_status?: "running" | "stopped" | "provisioning" | "failed";
 }

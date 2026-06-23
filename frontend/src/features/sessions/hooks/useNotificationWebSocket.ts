@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { useNotificationStore } from "../stores/notification.store";
 import type { NotificationEventType } from "../stores/notification.store";
+import { queryClient } from "@/config/query-client";
+import { sessionKeys } from "./useSessions";
 
 interface NotificationMsg {
   session_id: string;
@@ -8,6 +10,15 @@ interface NotificationMsg {
   message: string;
   event_type: NotificationEventType;
 }
+
+interface SessionStatusMsg {
+  type: "session_status";
+  session_id: string;
+  status: "running" | "failed";
+  error?: string;
+}
+
+type IncomingMsg = NotificationMsg | SessionStatusMsg;
 
 export function useNotificationWebSocket(): void {
   useEffect(() => {
@@ -22,10 +33,15 @@ export function useNotificationWebSocket(): void {
 
       ws.onmessage = (event: MessageEvent) => {
         try {
-          const msg = JSON.parse(event.data as string) as NotificationMsg;
-          useNotificationStore
-            .getState()
-            .notify(msg.session_id, msg.session_name, msg.message, msg.event_type);
+          const msg = JSON.parse(event.data as string) as IncomingMsg;
+          if ("type" in msg && msg.type === "session_status") {
+            void queryClient.invalidateQueries({ queryKey: sessionKeys.all });
+          } else {
+            const notif = msg as NotificationMsg;
+            useNotificationStore
+              .getState()
+              .notify(notif.session_id, notif.session_name, notif.message, notif.event_type);
+          }
         } catch {
           // Ignore malformed messages
         }
