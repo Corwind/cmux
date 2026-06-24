@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, type ReactNode } from "react";
+import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
 import { useThemeVars } from "@/features/terminal";
 import { SettingsModal } from "./SettingsModal";
 
@@ -11,6 +11,13 @@ export function AppLayout({ sidebar, children }: AppLayoutProps) {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const isDragging = useRef(false);
   const themeVars = useThemeVars();
+
+  useEffect(() => {
+    const root = document.documentElement;
+    for (const [key, value] of Object.entries(themeVars)) {
+      root.style.setProperty(key, value as string);
+    }
+  }, [themeVars]);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
