@@ -27,13 +27,12 @@ func NewRepository(dbPath string) (*Repository, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// Append foreign_keys pragma to the DSN so every connection in the pool
+	// has FK enforcement enabled, not just the first one.
+	dsn := dbPath + "?_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
 	if _, err := db.Exec(createSessionsTable); err != nil {

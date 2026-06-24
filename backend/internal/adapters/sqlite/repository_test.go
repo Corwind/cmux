@@ -353,6 +353,40 @@ func TestRepository_ErrorFieldInList(t *testing.T) {
 	}
 }
 
+func TestRepository_DeleteSession_ClearsWorktreeSessionID(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	sess := makeSession("linked")
+	if err := repo.Create(ctx, sess); err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	wt := domain.ManagedWorktree{
+		ID:        "wt-1",
+		Path:      "/tmp/wt-1",
+		Branch:    "feat/x",
+		RepoRoot:  "/tmp/repo",
+		SessionID: &sess.ID,
+		CreatedAt: time.Now(),
+	}
+	if err := repo.CreateWorktree(ctx, wt); err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+
+	if err := repo.Delete(ctx, sess.ID); err != nil {
+		t.Fatalf("Delete session: %v", err)
+	}
+
+	got, err := repo.GetWorktree(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("GetWorktree: %v", err)
+	}
+	if got.SessionID != nil {
+		t.Errorf("expected session_id to be NULL after session deleted, got %q", *got.SessionID)
+	}
+}
+
 func TestRepository_ListOrderByCreatedAtDesc(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
