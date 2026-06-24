@@ -22,6 +22,7 @@ func toSessionResponse(s domain.Session) sessionResponse {
 		RepoRoot:        s.RepoRoot,
 		GitBranch:       s.GitBranch,
 		WorktreeManaged: s.WorktreeManaged,
+		ErrorMessage:    s.Error,
 		CreatedAt:       s.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:       s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
@@ -62,6 +63,7 @@ type sessionResponse struct {
 	RepoRoot        string `json:"repo_root,omitempty"`
 	GitBranch       string `json:"git_branch,omitempty"`
 	WorktreeManaged bool   `json:"worktree_managed,omitempty"`
+	ErrorMessage    string `json:"error_message,omitempty"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 }
