@@ -57,10 +57,7 @@ export function SessionList() {
         <li key={session.id}>
           <button
             type="button"
-            disabled={
-              session.status === "provisioning" ||
-              session.status === "failed"
-            }
+            disabled={session.status === "provisioning"}
             onClick={() => {
               if (
                 session.status === "provisioning" ||
