@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
 	"github.com/Corwind/cmux/backend/internal/ports"
@@ -23,6 +24,7 @@ var ErrSessionProvisioning = errors.New("session is still provisioning")
 // dependency on the hub package here.
 type SessionEventBroadcaster interface {
 	BroadcastSessionStatus(sessionID, sessionName, status, errMsg string)
+	BroadcastWorktreeDeleted(worktreeID, errMsg string)
 }
 
 // WorktreeSpec describes how to create or attach a git worktree for a session.
@@ -52,6 +54,7 @@ type SessionService struct {
 	worktreesDir   string
 	mu             sync.RWMutex
 	provisionCtxs  sync.Map // key: sessionID string, value: context.CancelFunc
+	deletionCtxs   sync.Map // key: worktreeID string, value: context.CancelFunc
 	broadcaster    SessionEventBroadcaster
 }
 
@@ -471,6 +474,11 @@ func (s *SessionService) ListWorktrees(ctx context.Context) ([]domain.WorktreeEn
 	return entries, nil
 }
 
+// worktreeDeletionTimeout bounds how long the async worktree-removal goroutine
+// waits on git before giving up and deleting the DB record anyway. It is a var
+// (not a const) so tests can shrink it to exercise the hang-protection path.
+var worktreeDeletionTimeout = 5 * time.Minute
+
 // ErrWorktreeHasSession is returned when trying to delete a worktree that
 // still has a linked session. Delete the session first to unlink it.
 type ErrWorktreeHasSession struct {
@@ -482,8 +490,11 @@ func (e *ErrWorktreeHasSession) Error() string {
 	return fmt.Sprintf("cannot delete worktree %q: session %q is still linked — delete the session first", e.WorktreeID, e.SessionID)
 }
 
-// DeleteWorktree removes a worktree. Returns ErrWorktreeHasSession if a
-// session is still linked to it.
+// DeleteWorktree removes a worktree asynchronously. It marks the worktree as
+// deleting, returns immediately, and runs the git removal + DB cleanup in a
+// background goroutine, broadcasting completion when done. Returns
+// ErrWorktreeHasSession if a session is still linked to it. Calls that arrive
+// while a deletion is already in flight are idempotent no-ops.
 func (s *SessionService) DeleteWorktree(ctx context.Context, id string) error {
 	if s.worktreeRepo == nil {
 		return fmt.Errorf("worktree repository not configured")
@@ -498,19 +509,63 @@ func (s *SessionService) DeleteWorktree(ctx context.Context, id string) error {
 		return &ErrWorktreeHasSession{WorktreeID: id, SessionID: *wt.SessionID}
 	}
 
+	// Already being deleted according to the DB — idempotent. This also covers
+	// a stale 'deleting' row left behind after a process restart, where no
+	// in-process goroutine exists to gate on.
+	if wt.Status == domain.WorktreeStatusDeleting {
+		return nil
+	}
+
+	// Atomic in-flight gate: LoadOrStore is the source of truth for "a deletion
+	// for this id is already running in this process". This closes the TOCTOU
+	// window where two concurrent calls on a 'ready' worktree both pass the DB
+	// status check above and each launch a goroutine (double git-remove +
+	// spurious error broadcast). The bounded context also protects against a
+	// hung git removal — on timeout the goroutine still deletes the DB record.
+	delCtx, cancel := context.WithTimeout(context.Background(), worktreeDeletionTimeout)
+	if _, inFlight := s.deletionCtxs.LoadOrStore(id, cancel); inFlight {
+		cancel() // already running — idempotent no-op
+		return nil
+	}
+
+	if err := s.worktreeRepo.SetStatus(ctx, id, domain.WorktreeStatusDeleting); err != nil {
+		s.deletionCtxs.Delete(id)
+		cancel()
+		return fmt.Errorf("failed to mark worktree as deleting: %w", err)
+	}
+
+	go s.removeWorktree(wt, delCtx, cancel)
+
+	return nil
+}
+
+// removeWorktree is the async goroutine that calls git worktree remove, then
+// deletes the DB record regardless of the git outcome. Git removal is
+// best-effort: a git error is logged and surfaced via the broadcast, but never
+// blocks removal of the DB record.
+func (s *SessionService) removeWorktree(wt domain.ManagedWorktree, delCtx context.Context, cancel context.CancelFunc) {
+	defer func() {
+		cancel()
+		s.deletionCtxs.Delete(wt.ID)
+	}()
+
+	var gitErr string
 	if s.gitService != nil {
-		if err := s.gitService.RemoveWorktree(ctx, wt.RepoRoot, wt.Path, false); err != nil {
-			slog.Error("failed to remove git worktree", "worktree_id", id, "path", wt.Path, "err", err)
+		if err := s.gitService.RemoveWorktree(delCtx, wt.RepoRoot, wt.Path, false); err != nil {
+			slog.Error("failed to remove git worktree", "worktree_id", wt.ID, "path", wt.Path, "err", err)
+			gitErr = err.Error()
 		}
 	}
 
-	if err := s.worktreeRepo.Delete(ctx, id); err != nil {
-		slog.Error("failed to delete worktree record", "worktree_id", id, "err", err)
-		return err
+	if err := s.worktreeRepo.Delete(context.Background(), wt.ID); err != nil {
+		slog.Error("failed to delete worktree record", "worktree_id", wt.ID, "err", err)
+	} else {
+		slog.Info("worktree deleted", "worktree_id", wt.ID, "path", wt.Path)
 	}
 
-	slog.Info("worktree deleted", "worktree_id", id, "path", wt.Path)
-	return nil
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastWorktreeDeleted(wt.ID, gitErr)
+	}
 }
 
 func (s *SessionService) watchProcess(sessionID string, handle *ports.PTYHandle) {

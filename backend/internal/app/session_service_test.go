@@ -1017,9 +1017,11 @@ func TestDeleteSession_DoesNotRemoveWorktree(t *testing.T) {
 // --- Mock SessionEventBroadcaster ---
 
 type mockBroadcaster struct {
-	mu     sync.Mutex
-	events []broadcastEvent
-	ch     chan broadcastEvent
+	mu       sync.Mutex
+	events   []broadcastEvent
+	ch       chan broadcastEvent
+	wtEvents []worktreeDeletedEvent
+	wtCh     chan worktreeDeletedEvent
 }
 
 type broadcastEvent struct {
@@ -1029,8 +1031,16 @@ type broadcastEvent struct {
 	errMsg    string
 }
 
+type worktreeDeletedEvent struct {
+	worktreeID string
+	errMsg     string
+}
+
 func newMockBroadcaster() *mockBroadcaster {
-	return &mockBroadcaster{ch: make(chan broadcastEvent, 10)}
+	return &mockBroadcaster{
+		ch:   make(chan broadcastEvent, 10),
+		wtCh: make(chan worktreeDeletedEvent, 10),
+	}
 }
 
 func (m *mockBroadcaster) BroadcastSessionStatus(sessionID, name, status, errMsg string) {
@@ -1039,6 +1049,31 @@ func (m *mockBroadcaster) BroadcastSessionStatus(sessionID, name, status, errMsg
 	m.events = append(m.events, evt)
 	m.mu.Unlock()
 	m.ch <- evt
+}
+
+func (m *mockBroadcaster) BroadcastWorktreeDeleted(worktreeID, errMsg string) {
+	evt := worktreeDeletedEvent{worktreeID: worktreeID, errMsg: errMsg}
+	m.mu.Lock()
+	m.wtEvents = append(m.wtEvents, evt)
+	m.mu.Unlock()
+	m.wtCh <- evt
+}
+
+func (m *mockBroadcaster) worktreeEventCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.wtEvents)
+}
+
+func (m *mockBroadcaster) waitForWorktreeEvent(t *testing.T, timeout time.Duration) worktreeDeletedEvent {
+	t.Helper()
+	select {
+	case evt := <-m.wtCh:
+		return evt
+	case <-time.After(timeout):
+		t.Fatal("timed out waiting for worktree deleted event")
+		return worktreeDeletedEvent{}
+	}
 }
 
 func (m *mockBroadcaster) waitForEvent(t *testing.T, timeout time.Duration) broadcastEvent {

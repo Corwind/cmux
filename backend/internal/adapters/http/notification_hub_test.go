@@ -3,8 +3,67 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
+
+func TestNotificationHub_BroadcastWorktreeDeleted_Delivered(t *testing.T) {
+	hub := newNotificationHub()
+
+	ch, unsub := hub.subscribe()
+	defer unsub()
+
+	hub.BroadcastWorktreeDeleted("wt-1", "")
+
+	select {
+	case data := <-ch:
+		var msg worktreeDeletedMsg
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Fatalf("failed to unmarshal message: %v", err)
+		}
+		if msg.Type != "worktree_deleted" {
+			t.Errorf("expected type %q, got %q", "worktree_deleted", msg.Type)
+		}
+		if msg.WorktreeID != "wt-1" {
+			t.Errorf("expected worktree_id %q, got %q", "wt-1", msg.WorktreeID)
+		}
+	default:
+		t.Fatal("expected data to be delivered to subscriber")
+	}
+}
+
+func TestNotificationHub_BroadcastWorktreeDeleted_ErrorField(t *testing.T) {
+	hub := newNotificationHub()
+
+	ch, unsub := hub.subscribe()
+	defer unsub()
+
+	hub.BroadcastWorktreeDeleted("wt-2", "git remove failed")
+
+	select {
+	case data := <-ch:
+		var msg worktreeDeletedMsg
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Fatalf("failed to unmarshal message: %v", err)
+		}
+		if msg.Error != "git remove failed" {
+			t.Errorf("expected error %q, got %q", "git remove failed", msg.Error)
+		}
+		// With a non-empty error the field must be present in the raw JSON.
+		if !strings.Contains(string(data), "\"error\"") {
+			t.Errorf("expected error field in payload, got %s", data)
+		}
+	default:
+		t.Fatal("expected data to be delivered to subscriber")
+	}
+}
+
+func TestNotificationHub_BroadcastWorktreeDeleted_NoSubscribers(t *testing.T) {
+	hub := newNotificationHub()
+
+	// Must not panic with zero subscribers.
+	hub.BroadcastWorktreeDeleted("wt-3", "")
+}
 
 func TestParseOscNotification_Osc777(t *testing.T) {
 	data := []byte("\x1b]777;notify;Claude Code;Claude needs your permission\x07")

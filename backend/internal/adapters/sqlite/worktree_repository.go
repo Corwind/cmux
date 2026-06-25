@@ -42,3 +42,7 @@ func (w *WorktreeRepo) DeleteByPath(ctx context.Context, path string) error {
 func (w *WorktreeRepo) SetSession(ctx context.Context, worktreeID string, sessionID *string) error {
 	return w.r.SetWorktreeSession(ctx, worktreeID, sessionID)
 }
+
+func (w *WorktreeRepo) SetStatus(ctx context.Context, id string, status domain.WorktreeStatus) error {
+	return w.r.SetWorktreeStatus(ctx, id, status)
+}

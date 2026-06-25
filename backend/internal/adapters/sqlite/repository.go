@@ -49,6 +49,12 @@ func NewRepository(dbPath string) (*Repository, error) {
 		}
 	}
 
+	if _, err := db.Exec(addStatusToWorktrees); err != nil {
+		if !isDuplicateColumnError(err) {
+			return nil, fmt.Errorf("failed to add status column to worktrees: %w", err)
+		}
+	}
+
 	if _, err := db.Exec(createWorktreeSessionsTable); err != nil {
 		return nil, fmt.Errorf("failed to create worktree_sessions table: %w", err)
 	}
@@ -157,16 +163,20 @@ func (r *Repository) Close() error {
 // WorktreeRepository interface implementation
 
 func (r *Repository) CreateWorktree(ctx context.Context, wt domain.ManagedWorktree) error {
+	status := wt.Status
+	if status == "" {
+		status = domain.WorktreeStatusReady
+	}
 	_, err := r.db.ExecContext(ctx,
-		"INSERT OR IGNORE INTO worktrees (id, path, branch, repo_root, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-		wt.ID, wt.Path, wt.Branch, wt.RepoRoot, wt.SessionID, wt.CreatedAt,
+		"INSERT OR IGNORE INTO worktrees (id, path, branch, repo_root, session_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		wt.ID, wt.Path, wt.Branch, wt.RepoRoot, wt.SessionID, string(status), wt.CreatedAt,
 	)
 	return err
 }
 
 func (r *Repository) ListWorktrees(ctx context.Context) ([]domain.ManagedWorktree, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, path, branch, repo_root, session_id, created_at FROM worktrees ORDER BY created_at DESC",
+		"SELECT id, path, branch, repo_root, session_id, status, created_at FROM worktrees ORDER BY created_at DESC",
 	)
 	if err != nil {
 		return nil, err
@@ -176,7 +186,7 @@ func (r *Repository) ListWorktrees(ctx context.Context) ([]domain.ManagedWorktre
 	var wts []domain.ManagedWorktree
 	for rows.Next() {
 		var wt domain.ManagedWorktree
-		if err := rows.Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.SessionID, &wt.CreatedAt); err != nil {
+		if err := rows.Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.SessionID, &wt.Status, &wt.CreatedAt); err != nil {
 			return nil, err
 		}
 		wts = append(wts, wt)
@@ -187,8 +197,8 @@ func (r *Repository) ListWorktrees(ctx context.Context) ([]domain.ManagedWorktre
 func (r *Repository) GetWorktree(ctx context.Context, id string) (domain.ManagedWorktree, error) {
 	var wt domain.ManagedWorktree
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, path, branch, repo_root, session_id, created_at FROM worktrees WHERE id = ?", id,
-	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.SessionID, &wt.CreatedAt)
+		"SELECT id, path, branch, repo_root, session_id, status, created_at FROM worktrees WHERE id = ?", id,
+	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.SessionID, &wt.Status, &wt.CreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.ManagedWorktree{}, fmt.Errorf("worktree not found: %s", id)
 	}
@@ -198,8 +208,8 @@ func (r *Repository) GetWorktree(ctx context.Context, id string) (domain.Managed
 func (r *Repository) GetWorktreeByPath(ctx context.Context, path string) (domain.ManagedWorktree, error) {
 	var wt domain.ManagedWorktree
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, path, branch, repo_root, session_id, created_at FROM worktrees WHERE path = ?", path,
-	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.SessionID, &wt.CreatedAt)
+		"SELECT id, path, branch, repo_root, session_id, status, created_at FROM worktrees WHERE path = ?", path,
+	).Scan(&wt.ID, &wt.Path, &wt.Branch, &wt.RepoRoot, &wt.SessionID, &wt.Status, &wt.CreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.ManagedWorktree{}, fmt.Errorf("worktree not found: %s", path)
 	}
@@ -251,5 +261,13 @@ func (r *Repository) ListWorktreeSessionIDs(ctx context.Context, worktreeID stri
 
 func (r *Repository) SetWorktreeSession(ctx context.Context, worktreeID string, sessionID *string) error {
 	_, err := r.db.ExecContext(ctx, "UPDATE worktrees SET session_id = ? WHERE id = ?", sessionID, worktreeID)
+	return err
+}
+
+func (r *Repository) SetWorktreeStatus(ctx context.Context, id string, status domain.WorktreeStatus) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE worktrees SET status = ? WHERE id = ?",
+		string(status), id,
+	)
 	return err
 }

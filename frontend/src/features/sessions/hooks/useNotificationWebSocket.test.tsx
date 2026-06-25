@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { renderHook, waitFor } from "@/test/test-utils";
 import { useNotificationWebSocket } from "./useNotificationWebSocket";
 import { useNotificationStore } from "../stores/notification.store";
+import { useToastStore } from "@/components/ui/Toast";
 import { queryClient } from "@/config/query-client";
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,7 @@ describe("useNotificationWebSocket", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", MockWebSocket);
     useNotificationStore.setState({ notifications: {} });
+    useToastStore.setState({ toasts: [] });
     invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     currentWs = null;
   });
@@ -118,6 +120,54 @@ describe("useNotificationWebSocket", () => {
       expect(invalidateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ queryKey: expect.arrayContaining(["sessions"]) }),
       );
+    });
+  });
+
+  it("worktree_deleted with no error invalidates the worktrees query", async () => {
+    renderHook(() => useNotificationWebSocket());
+
+    await waitFor(() => expect(currentWs).not.toBeNull());
+
+    sendMessage({ type: "worktree_deleted", worktree_id: "wt-1" });
+
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: expect.arrayContaining(["worktrees"]) }),
+      );
+    });
+  });
+
+  it("worktree_deleted with no error shows no toast", async () => {
+    renderHook(() => useNotificationWebSocket());
+
+    await waitFor(() => expect(currentWs).not.toBeNull());
+
+    sendMessage({ type: "worktree_deleted", worktree_id: "wt-1" });
+
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: expect.arrayContaining(["worktrees"]) }),
+      );
+    });
+
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+  });
+
+  it("worktree_deleted with an error shows an error toast", async () => {
+    renderHook(() => useNotificationWebSocket());
+
+    await waitFor(() => expect(currentWs).not.toBeNull());
+
+    sendMessage({ type: "worktree_deleted", worktree_id: "wt-1", error: "rm failed" });
+
+    await waitFor(() => {
+      const toasts = useToastStore.getState().toasts;
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0]).toMatchObject({
+        variant: "error",
+        title: "Worktree removal failed",
+        message: "rm failed",
+      });
     });
   });
 

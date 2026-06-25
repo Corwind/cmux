@@ -3,6 +3,9 @@ import { useSessionsStore } from "../stores/sessions.store";
 import type { WorktreeEntry } from "../types";
 
 function statusDotColor(entry: WorktreeEntry): string {
+  if (entry.status === "deleting") {
+    return "#f97316"; // orange
+  }
   if (entry.session_status === "running") {
     return "#22c55e";
   }
@@ -47,11 +50,20 @@ export function WorktreePanel() {
             {repoRoot.split("/").pop() ?? repoRoot}
           </div>
           <ul className="space-y-0.5">
-            {entries.map((entry) => (
+            {entries.map((entry) => {
+              const isDeleting = entry.status === "deleting";
+              const hasSession = !!entry.session_id;
+              const deleteDisabled = hasSession || isDeleting;
+              const deleteTitle = hasSession
+                ? "Delete the session first to remove this worktree"
+                : isDeleting
+                  ? "Removing worktree..."
+                  : "Delete worktree";
+              return (
               <li key={entry.id}>
                 <div
                   className="flex w-full items-center justify-between rounded px-2 py-1 text-sm transition-colors"
-                  style={{ color: "var(--cmux-text-secondary)" }}
+                  style={{ color: "var(--cmux-text-secondary)", opacity: isDeleting ? 0.5 : 1 }}
                 >
                   <button
                     type="button"
@@ -83,24 +95,43 @@ export function WorktreePanel() {
                     <span className="truncate font-mono text-xs" title={entry.branch}>
                       {entry.branch}
                     </span>
+                    {isDeleting && (
+                      <svg
+                        className="h-3 w-3 shrink-0 animate-spin"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        aria-label="Removing worktree"
+                        role="img"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                        />
+                      </svg>
+                    )}
                   </button>
                   <button
                     type="button"
-                    disabled={!!entry.session_id}
+                    disabled={deleteDisabled}
                     onClick={() => deleteWorktree.mutate(entry.id)}
                     className="ml-1 shrink-0 rounded p-0.5 transition-colors"
                     style={{
                       color: "var(--cmux-text-faint)",
-                      opacity: entry.session_id ? 0.3 : 1,
-                      cursor: entry.session_id ? "not-allowed" : "pointer",
+                      opacity: deleteDisabled ? 0.3 : 1,
+                      cursor: deleteDisabled ? "not-allowed" : "pointer",
                     }}
-                    title={
-                      entry.session_id
-                        ? "Delete the session first to remove this worktree"
-                        : "Delete worktree"
-                    }
+                    title={deleteTitle}
                     onMouseEnter={(e) => {
-                      if (!entry.session_id) {
+                      if (!deleteDisabled) {
                         e.currentTarget.style.backgroundColor = "var(--cmux-surface-hover)";
                         e.currentTarget.style.color = "#f87171";
                       }
@@ -126,7 +157,8 @@ export function WorktreePanel() {
                   </button>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       ))}
