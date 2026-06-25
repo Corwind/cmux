@@ -40,6 +40,7 @@ export interface WorktreeEntry {
   path: string;
   branch: string;
   repo_root: string;
+  status: "ready" | "deleting";
   created_at: string;
   session_id?: string;
   session_name?: string;

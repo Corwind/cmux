@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "@/components/ui/Toast";
 import type { WorktreeEntry } from "../types";
@@ -20,13 +20,9 @@ export function useWorktrees() {
 }
 
 export function useDeleteWorktree() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: (id: string) => apiClient.delete<void>(`/worktrees/${id}`),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: worktreeKeys.all });
-    },
+    // No onSuccess invalidation — the worktree_deleted WS event handles that.
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Failed to delete worktree.";
       toast("error", "Cannot delete worktree", message);

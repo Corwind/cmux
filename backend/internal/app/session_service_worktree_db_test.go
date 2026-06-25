@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,9 +13,30 @@ import (
 
 // --- Mock WorktreeRepository ---
 
+// mockWorktreeRepo is goroutine-safe: the async DeleteWorktree goroutine writes
+// (SetStatus / Delete) concurrently with test reads, so all map access is guarded
+// by mu to keep the race detector happy.
 type mockWorktreeRepo struct {
-	worktrees map[string]domain.ManagedWorktree
-	byPath    map[string]string // path → id
+	mu           sync.Mutex
+	worktrees    map[string]domain.ManagedWorktree
+	byPath       map[string]string // path → id
+	setStatusErr error             // if set, SetStatus returns this error
+	deleteErr    error             // if set, Delete returns this error (record kept)
+}
+
+// setSetStatusErr / setDeleteErr mutate the injection fields under the mock
+// mutex so writes from the test goroutine don't race the removeWorktree
+// goroutine's locked reads.
+func (m *mockWorktreeRepo) setSetStatusErr(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setStatusErr = err
+}
+
+func (m *mockWorktreeRepo) setDeleteErr(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deleteErr = err
 }
 
 func newMockWorktreeRepo() *mockWorktreeRepo {
@@ -24,6 +47,8 @@ func newMockWorktreeRepo() *mockWorktreeRepo {
 }
 
 func (m *mockWorktreeRepo) Create(ctx context.Context, wt domain.ManagedWorktree) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, exists := m.byPath[wt.Path]; exists {
 		return nil // idempotent
 	}
@@ -33,6 +58,8 @@ func (m *mockWorktreeRepo) Create(ctx context.Context, wt domain.ManagedWorktree
 }
 
 func (m *mockWorktreeRepo) List(ctx context.Context) ([]domain.ManagedWorktree, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var result []domain.ManagedWorktree
 	for _, wt := range m.worktrees {
 		result = append(result, wt)
@@ -41,6 +68,8 @@ func (m *mockWorktreeRepo) List(ctx context.Context) ([]domain.ManagedWorktree, 
 }
 
 func (m *mockWorktreeRepo) Get(ctx context.Context, id string) (domain.ManagedWorktree, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	wt, ok := m.worktrees[id]
 	if !ok {
 		return domain.ManagedWorktree{}, domain.ErrWorktreeNotFound(id)
@@ -49,6 +78,8 @@ func (m *mockWorktreeRepo) Get(ctx context.Context, id string) (domain.ManagedWo
 }
 
 func (m *mockWorktreeRepo) GetByPath(ctx context.Context, path string) (domain.ManagedWorktree, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	id, ok := m.byPath[path]
 	if !ok {
 		return domain.ManagedWorktree{}, domain.ErrWorktreeNotFound(path)
@@ -57,6 +88,11 @@ func (m *mockWorktreeRepo) GetByPath(ctx context.Context, path string) (domain.M
 }
 
 func (m *mockWorktreeRepo) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
 	wt, ok := m.worktrees[id]
 	if !ok {
 		return nil
@@ -67,7 +103,9 @@ func (m *mockWorktreeRepo) Delete(ctx context.Context, id string) error {
 }
 
 func (m *mockWorktreeRepo) DeleteByPath(ctx context.Context, path string) error {
+	m.mu.Lock()
 	id, ok := m.byPath[path]
+	m.mu.Unlock()
 	if !ok {
 		return nil
 	}
@@ -75,12 +113,29 @@ func (m *mockWorktreeRepo) DeleteByPath(ctx context.Context, path string) error 
 }
 
 func (m *mockWorktreeRepo) SetSession(ctx context.Context, worktreeID string, sessionID *string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	wt, ok := m.worktrees[worktreeID]
 	if !ok {
 		return nil
 	}
 	wt.SessionID = sessionID
 	m.worktrees[worktreeID] = wt
+	return nil
+}
+
+func (m *mockWorktreeRepo) SetStatus(ctx context.Context, id string, status domain.WorktreeStatus) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.setStatusErr != nil {
+		return m.setStatusErr
+	}
+	wt, ok := m.worktrees[id]
+	if !ok {
+		return nil
+	}
+	wt.Status = status
+	m.worktrees[id] = wt
 	return nil
 }
 
@@ -341,27 +396,6 @@ func TestListWorktrees_OrphanedWorktree_NoSessions(t *testing.T) {
 	}
 }
 
-func TestDeleteWorktree_Success(t *testing.T) {
-	repo := newMockRepo()
-	pm := newMockProcessManager()
-	git := newMockGitService()
-	wtr := newMockWorktreeRepo()
-	svc := NewSessionService(repo, pm, nil,
-		WithGitService(git, "/tmp/worktrees"),
-		WithWorktreeRepository(wtr),
-	)
-
-	wtRecord := domain.ManagedWorktree{ID: "wt-orphan", Path: "/tmp/orphan", Branch: "feat", RepoRoot: "/repo", CreatedAt: time.Now()}
-	_ = wtr.Create(context.Background(), wtRecord)
-
-	if err := svc.DeleteWorktree(context.Background(), "wt-orphan"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, err := wtr.Get(context.Background(), "wt-orphan"); err == nil {
-		t.Error("expected worktree record to be deleted")
-	}
-}
-
 func TestDeleteWorktree_LinkedSession_ReturnsError(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
@@ -386,5 +420,430 @@ func TestDeleteWorktree_LinkedSession_ReturnsError(t *testing.T) {
 		// clean up for next iteration
 		_ = wtr.Delete(context.Background(), "wt-1")
 		_ = repo.Delete(context.Background(), sess.ID)
+	}
+}
+
+// waitForCondition polls fn until it returns true or the timeout elapses,
+// failing the test on timeout. Mirrors the existing waitForSessionStatus
+// polling pattern and avoids time.Sleep in tests.
+func waitForCondition(t *testing.T, timeout time.Duration, msg string, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for condition: %s", msg)
+}
+
+func newDeletableWorktreeSvc(t *testing.T) (*SessionService, *mockGitService, *mockWorktreeRepo, *mockBroadcaster) {
+	t.Helper()
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	wtr := newMockWorktreeRepo()
+	broadcaster := newMockBroadcaster()
+	svc := NewSessionService(repo, pm, nil,
+		WithGitService(git, "/tmp/worktrees"),
+		WithWorktreeRepository(wtr),
+		WithBroadcaster(broadcaster),
+	)
+	return svc, git, wtr, broadcaster
+}
+
+func TestDeleteWorktree_AsyncReturnsImmediately(t *testing.T) {
+	svc, git, wtr, _ := newDeletableWorktreeSvc(t)
+
+	release := make(chan struct{})
+	git.removeWorktreeFn = func(ctx context.Context, repoRoot, wtPath string, force bool) error {
+		<-release // block until the test releases the goroutine
+		return nil
+	}
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	// DeleteWorktree must return before git removal completes.
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The DB record must still exist while git removal is blocked.
+	if _, err := wtr.Get(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("expected worktree record to still exist while deletion in flight: %v", err)
+	}
+
+	close(release)
+}
+
+func TestDeleteWorktree_MarksDeleting(t *testing.T) {
+	svc, git, wtr, _ := newDeletableWorktreeSvc(t)
+
+	release := make(chan struct{})
+	git.removeWorktreeFn = func(ctx context.Context, repoRoot, wtPath string, force bool) error {
+		<-release
+		return nil
+	}
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wt, err := wtr.Get(context.Background(), "wt-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if wt.Status != domain.WorktreeStatusDeleting {
+		t.Errorf("expected status %q, got %q", domain.WorktreeStatusDeleting, wt.Status)
+	}
+
+	close(release)
+}
+
+func TestDeleteWorktree_GitRemoveCalledWithCorrectArgs(t *testing.T) {
+	svc, git, wtr, broadcaster := newDeletableWorktreeSvc(t)
+
+	var gotRepoRoot, gotPath string
+	var gotForce bool
+	git.removeWorktreeFn = func(ctx context.Context, repoRoot, wtPath string, force bool) error {
+		gotRepoRoot, gotPath, gotForce = repoRoot, wtPath, force
+		return nil
+	}
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	broadcaster.waitForWorktreeEvent(t, 2*time.Second)
+
+	if gotRepoRoot != "/repo" {
+		t.Errorf("expected repoRoot %q, got %q", "/repo", gotRepoRoot)
+	}
+	if gotPath != "/tmp/wt" {
+		t.Errorf("expected path %q, got %q", "/tmp/wt", gotPath)
+	}
+	if gotForce {
+		t.Error("expected force=false")
+	}
+}
+
+func TestDeleteWorktree_DBRecordDeletedAfterGitSuccess(t *testing.T) {
+	svc, _, wtr, _ := newDeletableWorktreeSvc(t)
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	waitForCondition(t, 2*time.Second, "worktree record deleted", func() bool {
+		_, err := wtr.Get(context.Background(), "wt-1")
+		return err != nil
+	})
+}
+
+func TestDeleteWorktree_DBRecordDeletedEvenOnGitError(t *testing.T) {
+	svc, git, wtr, _ := newDeletableWorktreeSvc(t)
+
+	git.removeWorktreeFn = func(ctx context.Context, repoRoot, wtPath string, force bool) error {
+		return fmt.Errorf("git boom")
+	}
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	waitForCondition(t, 2*time.Second, "worktree record deleted despite git error", func() bool {
+		_, err := wtr.Get(context.Background(), "wt-1")
+		return err != nil
+	})
+}
+
+func TestDeleteWorktree_BroadcastsCompletionOnSuccess(t *testing.T) {
+	svc, _, wtr, broadcaster := newDeletableWorktreeSvc(t)
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	evt := broadcaster.waitForWorktreeEvent(t, 2*time.Second)
+	if evt.worktreeID != "wt-1" {
+		t.Errorf("expected worktree_id %q, got %q", "wt-1", evt.worktreeID)
+	}
+	if evt.errMsg != "" {
+		t.Errorf("expected empty error on success, got %q", evt.errMsg)
+	}
+}
+
+func TestDeleteWorktree_BroadcastsErrorOnGitFailure(t *testing.T) {
+	svc, git, wtr, broadcaster := newDeletableWorktreeSvc(t)
+
+	git.removeWorktreeFn = func(ctx context.Context, repoRoot, wtPath string, force bool) error {
+		return fmt.Errorf("git boom")
+	}
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	evt := broadcaster.waitForWorktreeEvent(t, 2*time.Second)
+	if evt.worktreeID != "wt-1" {
+		t.Errorf("expected worktree_id %q, got %q", "wt-1", evt.worktreeID)
+	}
+	if evt.errMsg == "" {
+		t.Error("expected non-empty error on git failure")
+	}
+}
+
+func TestDeleteWorktree_IdempotentWhenAlreadyDeleting(t *testing.T) {
+	svc, git, wtr, _ := newDeletableWorktreeSvc(t)
+
+	release := make(chan struct{})
+	git.removeWorktreeFn = func(ctx context.Context, repoRoot, wtPath string, force bool) error {
+		<-release
+		return nil
+	}
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	// First call starts deletion (and blocks in git removal).
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error on first call: %v", err)
+	}
+
+	// Wait until the record is marked deleting.
+	waitForCondition(t, 2*time.Second, "worktree marked deleting", func() bool {
+		wt, err := wtr.Get(context.Background(), "wt-1")
+		return err == nil && wt.Status == domain.WorktreeStatusDeleting
+	})
+
+	// Second call must be an idempotent no-op.
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error on idempotent second call: %v", err)
+	}
+
+	close(release)
+
+	// Only one git removal must have occurred.
+	waitForCondition(t, 2*time.Second, "worktree record deleted", func() bool {
+		_, err := wtr.Get(context.Background(), "wt-1")
+		return err != nil
+	})
+	if got := len(git.removedWorktreesSafe()); got != 1 {
+		t.Errorf("expected git RemoveWorktree to be called once, got %d", got)
+	}
+}
+
+func TestDeleteWorktree_ConcurrentCallsLaunchOnce(t *testing.T) {
+	svc, git, wtr, broadcaster := newDeletableWorktreeSvc(t)
+
+	release := make(chan struct{})
+	git.removeWorktreeFn = func(ctx context.Context, repoRoot, wtPath string, force bool) error {
+		<-release
+		return nil
+	}
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	// Fire N concurrent DeleteWorktree calls on the same ready worktree, all
+	// released together. The atomic deletionCtxs gate must let exactly one
+	// launch the removal goroutine and turn the rest into no-ops.
+	const n = 5
+	start := make(chan struct{})
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			errs[i] = svc.DeleteWorktree(context.Background(), "wt-1")
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent call %d returned error: %v", i, err)
+		}
+	}
+
+	// Let the single in-flight removal complete.
+	close(release)
+
+	waitForCondition(t, 2*time.Second, "worktree record deleted", func() bool {
+		_, err := wtr.Get(context.Background(), "wt-1")
+		return err != nil
+	})
+
+	if got := len(git.removedWorktreesSafe()); got != 1 {
+		t.Errorf("expected git RemoveWorktree to be called exactly once, got %d", got)
+	}
+
+	evt := broadcaster.waitForWorktreeEvent(t, 2*time.Second)
+	if evt.errMsg != "" {
+		t.Errorf("expected empty error on success, got %q", evt.errMsg)
+	}
+	if got := broadcaster.worktreeEventCount(); got != 1 {
+		t.Errorf("expected exactly 1 completion broadcast, got %d", got)
+	}
+}
+
+func TestDeleteWorktree_HangProtection(t *testing.T) {
+	// Shrink the deletion timeout so the test can exercise the hang path quickly.
+	old := worktreeDeletionTimeout
+	worktreeDeletionTimeout = 10 * time.Millisecond
+	defer func() { worktreeDeletionTimeout = old }()
+
+	svc, git, wtr, broadcaster := newDeletableWorktreeSvc(t)
+
+	// Simulate a hung git removal: block until the context (with timeout) fires,
+	// then return its error — exactly what runGit does when it kills the process.
+	git.removeWorktreeFn = func(ctx context.Context, repoRoot, wtPath string, force bool) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Even though git "hangs", the timeout unblocks the goroutine, which must
+	// still delete the DB record and broadcast a non-empty error.
+	evt := broadcaster.waitForWorktreeEvent(t, 2*time.Second)
+	if evt.worktreeID != "wt-1" {
+		t.Errorf("expected worktree_id %q, got %q", "wt-1", evt.worktreeID)
+	}
+	if evt.errMsg == "" {
+		t.Error("expected non-empty error from context timeout on hang")
+	}
+
+	waitForCondition(t, 2*time.Second, "worktree record deleted despite git hang", func() bool {
+		_, err := wtr.Get(context.Background(), "wt-1")
+		return err != nil
+	})
+}
+
+func TestDeleteWorktree_SetStatusFailure_ReturnsErrorAndCleansUp(t *testing.T) {
+	svc, git, wtr, broadcaster := newDeletableWorktreeSvc(t)
+
+	wtr.setSetStatusErr(fmt.Errorf("db boom"))
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	// SetStatus fails → DeleteWorktree must return a wrapped error, never touch
+	// git, leave the record present, and fire no broadcast.
+	err := svc.DeleteWorktree(context.Background(), "wt-1")
+	if err == nil {
+		t.Fatal("expected error when SetStatus fails")
+	}
+	if got := len(git.removedWorktreesSafe()); got != 0 {
+		t.Errorf("expected git RemoveWorktree to NOT be called, got %d calls", got)
+	}
+	if _, err := wtr.Get(context.Background(), "wt-1"); err != nil {
+		t.Errorf("expected worktree record to still exist, got %v", err)
+	}
+	if got := broadcaster.worktreeEventCount(); got != 0 {
+		t.Errorf("expected no broadcast on SetStatus failure, got %d", got)
+	}
+
+	// The id must be retryable (cleanup ran deletionCtxs.Delete + cancel).
+	wtr.setSetStatusErr(nil)
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("expected retry to succeed, got %v", err)
+	}
+	waitForCondition(t, 2*time.Second, "worktree record deleted on retry", func() bool {
+		_, err := wtr.Get(context.Background(), "wt-1")
+		return err != nil
+	})
+}
+
+func TestDeleteWorktree_NilGitService_StillDeletesAndBroadcasts(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	wtr := newMockWorktreeRepo()
+	broadcaster := newMockBroadcaster()
+	// No WithGitService → gitService is nil.
+	svc := NewSessionService(repo, pm, nil,
+		WithWorktreeRepository(wtr),
+		WithBroadcaster(broadcaster),
+	)
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// git is skipped (not an error) → broadcast carries an empty errMsg.
+	evt := broadcaster.waitForWorktreeEvent(t, 2*time.Second)
+	if evt.worktreeID != "wt-1" {
+		t.Errorf("expected worktree_id %q, got %q", "wt-1", evt.worktreeID)
+	}
+	if evt.errMsg != "" {
+		t.Errorf("expected empty error with nil git service, got %q", evt.errMsg)
+	}
+
+	waitForCondition(t, 2*time.Second, "worktree record deleted", func() bool {
+		_, err := wtr.Get(context.Background(), "wt-1")
+		return err != nil
+	})
+}
+
+func TestDeleteWorktree_DBDeleteFailure_StillBroadcasts(t *testing.T) {
+	svc, _, wtr, broadcaster := newDeletableWorktreeSvc(t)
+
+	wtr.setDeleteErr(fmt.Errorf("delete boom"))
+
+	_ = wtr.Create(context.Background(), domain.ManagedWorktree{ID: "wt-1", Path: "/tmp/wt", RepoRoot: "/repo", CreatedAt: time.Now()})
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Delete fails (best-effort) but the goroutine must still broadcast.
+	evt := broadcaster.waitForWorktreeEvent(t, 2*time.Second)
+	if evt.worktreeID != "wt-1" {
+		t.Errorf("expected worktree_id %q, got %q", "wt-1", evt.worktreeID)
+	}
+}
+
+func TestDeleteWorktree_NotFound_ReturnsError(t *testing.T) {
+	svc, git, _, broadcaster := newDeletableWorktreeSvc(t)
+
+	err := svc.DeleteWorktree(context.Background(), "does-not-exist")
+	if err == nil {
+		t.Fatal("expected error for unknown worktree id")
+	}
+	if got := len(git.removedWorktreesSafe()); got != 0 {
+		t.Errorf("expected git RemoveWorktree to NOT be called, got %d", got)
+	}
+	if got := broadcaster.worktreeEventCount(); got != 0 {
+		t.Errorf("expected no broadcast for unknown id, got %d", got)
+	}
+}
+
+func TestDeleteWorktree_NilRepo_ReturnsError(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	// No WithWorktreeRepository → worktreeRepo is nil.
+	svc := NewSessionService(repo, pm, nil)
+
+	if err := svc.DeleteWorktree(context.Background(), "wt-1"); err == nil {
+		t.Fatal("expected error when worktree repository not configured")
 	}
 }

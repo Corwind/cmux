@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS worktree_sessions (
 
 const addSessionIDToWorktrees = "ALTER TABLE worktrees ADD COLUMN session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL;"
 
+const addStatusToWorktrees = "ALTER TABLE worktrees ADD COLUMN status TEXT NOT NULL DEFAULT 'ready';"
+
 const createTemplatesTable = `
 CREATE TABLE IF NOT EXISTS sandbox_templates (
 	id TEXT PRIMARY KEY,

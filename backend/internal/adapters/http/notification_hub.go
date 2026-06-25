@@ -26,6 +26,15 @@ type sessionStatusMsg struct {
 	Error       string `json:"error,omitempty"`
 }
 
+// worktreeDeletedMsg is the JSON payload pushed when an async worktree deletion
+// finishes (success or git error). The frontend invalidates its worktrees query
+// on receipt and surfaces the error string when present.
+type worktreeDeletedMsg struct {
+	Type       string `json:"type"`
+	WorktreeID string `json:"worktree_id"`
+	Error      string `json:"error,omitempty"`
+}
+
 const notificationDebounce = 30 * time.Second
 
 // debounceKey identifies a (session, eventType) pair for rate-limiting.
@@ -113,6 +122,28 @@ func (h *notificationHub) BroadcastSessionStatus(sessionID, sessionName, status,
 		SessionName: sessionName,
 		Status:      status,
 		Error:       errMsg,
+	})
+	if err != nil {
+		return
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for ch := range h.clients {
+		select {
+		case ch <- data:
+		default:
+		}
+	}
+}
+
+// BroadcastWorktreeDeleted implements app.SessionEventBroadcaster. It serialises a
+// worktreeDeletedMsg and delivers it to every current subscriber without debouncing —
+// deletion completions are low-frequency and must never be dropped.
+func (h *notificationHub) BroadcastWorktreeDeleted(worktreeID, errMsg string) {
+	data, err := json.Marshal(worktreeDeletedMsg{
+		Type:       "worktree_deleted",
+		WorktreeID: worktreeID,
+		Error:      errMsg,
 	})
 	if err != nil {
 		return

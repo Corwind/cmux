@@ -173,6 +173,96 @@ func TestWorktreeRepo_SetAndClearSession(t *testing.T) {
 	}
 }
 
+func TestWorktreeRepo_StatusRoundTrip(t *testing.T) {
+	repo := setupTestRepo(t)
+	wtr := NewWorktreeRepository(repo)
+	ctx := context.Background()
+
+	// Create without explicitly setting Status — should default to "ready".
+	wt := makeWorktree("wt-1", "/tmp/wt1")
+	if err := wtr.Create(ctx, wt); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := wtr.Get(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Status != domain.WorktreeStatusReady {
+		t.Errorf("expected default status %q, got %q", domain.WorktreeStatusReady, got.Status)
+	}
+}
+
+func TestWorktreeRepo_SetStatus(t *testing.T) {
+	repo := setupTestRepo(t)
+	wtr := NewWorktreeRepository(repo)
+	ctx := context.Background()
+
+	wt := makeWorktree("wt-1", "/tmp/wt1")
+	if err := wtr.Create(ctx, wt); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if err := wtr.SetStatus(ctx, wt.ID, domain.WorktreeStatusDeleting); err != nil {
+		t.Fatalf("SetStatus failed: %v", err)
+	}
+
+	got, err := wtr.Get(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Status != domain.WorktreeStatusDeleting {
+		t.Errorf("expected status %q, got %q", domain.WorktreeStatusDeleting, got.Status)
+	}
+}
+
+func TestWorktreeRepo_List_IncludesStatus(t *testing.T) {
+	repo := setupTestRepo(t)
+	wtr := NewWorktreeRepository(repo)
+	ctx := context.Background()
+
+	_ = wtr.Create(ctx, makeWorktree("wt-1", "/tmp/wt1"))
+	_ = wtr.Create(ctx, makeWorktree("wt-2", "/tmp/wt2"))
+	if err := wtr.SetStatus(ctx, "wt-2", domain.WorktreeStatusDeleting); err != nil {
+		t.Fatalf("SetStatus failed: %v", err)
+	}
+
+	wts, err := wtr.List(ctx)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	statuses := map[string]domain.WorktreeStatus{}
+	for _, wt := range wts {
+		statuses[wt.ID] = wt.Status
+	}
+	if statuses["wt-1"] != domain.WorktreeStatusReady {
+		t.Errorf("expected wt-1 status %q, got %q", domain.WorktreeStatusReady, statuses["wt-1"])
+	}
+	if statuses["wt-2"] != domain.WorktreeStatusDeleting {
+		t.Errorf("expected wt-2 status %q, got %q", domain.WorktreeStatusDeleting, statuses["wt-2"])
+	}
+}
+
+func TestWorktreeRepo_StatusExplicitOnCreate(t *testing.T) {
+	repo := setupTestRepo(t)
+	wtr := NewWorktreeRepository(repo)
+	ctx := context.Background()
+
+	wt := makeWorktree("wt-1", "/tmp/wt1")
+	wt.Status = domain.WorktreeStatusDeleting
+	if err := wtr.Create(ctx, wt); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := wtr.Get(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Status != domain.WorktreeStatusDeleting {
+		t.Errorf("expected status %q, got %q", domain.WorktreeStatusDeleting, got.Status)
+	}
+}
+
 func TestWorktreeRepo_SessionID_RoundTrip(t *testing.T) {
 	repo := setupTestRepo(t)
 	wtr := NewWorktreeRepository(repo)

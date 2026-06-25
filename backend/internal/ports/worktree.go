@@ -14,4 +14,5 @@ type WorktreeRepository interface {
 	Delete(ctx context.Context, id string) error
 	DeleteByPath(ctx context.Context, path string) error
 	SetSession(ctx context.Context, worktreeID string, sessionID *string) error
+	SetStatus(ctx context.Context, id string, status domain.WorktreeStatus) error
 }

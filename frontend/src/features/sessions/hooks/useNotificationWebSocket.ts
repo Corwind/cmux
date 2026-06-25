@@ -3,6 +3,7 @@ import { useNotificationStore } from "../stores/notification.store";
 import type { NotificationEventType } from "../stores/notification.store";
 import { queryClient } from "@/config/query-client";
 import { sessionKeys } from "./useSessions";
+import { worktreeKeys } from "./useWorktrees";
 import { toast } from "@/components/ui/Toast";
 
 interface NotificationMsg {
@@ -19,7 +20,13 @@ interface SessionStatusMsg {
   error?: string;
 }
 
-type IncomingMsg = NotificationMsg | SessionStatusMsg;
+interface WorktreeDeletedMsg {
+  type: "worktree_deleted";
+  worktree_id: string;
+  error?: string;
+}
+
+type IncomingMsg = NotificationMsg | SessionStatusMsg | WorktreeDeletedMsg;
 
 export function useNotificationWebSocket(): void {
   useEffect(() => {
@@ -39,6 +46,11 @@ export function useNotificationWebSocket(): void {
             void queryClient.invalidateQueries({ queryKey: sessionKeys.all });
             if (msg.status === "failed") {
               toast("error", "Session provisioning failed", msg.error ?? "Worktree creation failed");
+            }
+          } else if ("type" in msg && msg.type === "worktree_deleted") {
+            void queryClient.invalidateQueries({ queryKey: worktreeKeys.all });
+            if (msg.error) {
+              toast("error", "Worktree removal failed", msg.error);
             }
           } else {
             const notif = msg as NotificationMsg;

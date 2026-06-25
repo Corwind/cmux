@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -10,8 +11,15 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// worktreeService is the seam the handler depends on. *app.SessionService
+// satisfies it; tests provide a lightweight mock.
+type worktreeService interface {
+	ListWorktrees(ctx context.Context) ([]domain.WorktreeEntry, error)
+	DeleteWorktree(ctx context.Context, id string) error
+}
+
 type worktreeHandler struct {
-	service *app.SessionService
+	service worktreeService
 }
 
 func NewWorktreeHandler(service *app.SessionService) *worktreeHandler {
@@ -23,6 +31,7 @@ type worktreeEntryResponse struct {
 	Path          string    `json:"path"`
 	Branch        string    `json:"branch"`
 	RepoRoot      string    `json:"repo_root"`
+	Status        string    `json:"status"`
 	CreatedAt     time.Time `json:"created_at"`
 	SessionID     *string   `json:"session_id,omitempty"`
 	SessionName   *string   `json:"session_name,omitempty"`
@@ -35,6 +44,7 @@ func toWorktreeResponse(e domain.WorktreeEntry) worktreeEntryResponse {
 		Path:          e.Path,
 		Branch:        e.Branch,
 		RepoRoot:      e.RepoRoot,
+		Status:        string(e.Status),
 		CreatedAt:     e.CreatedAt,
 		SessionID:     e.SessionID,
 		SessionName:   e.SessionName,
@@ -71,5 +81,7 @@ func (h *worktreeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]string{"worktree_id": id})
 }
