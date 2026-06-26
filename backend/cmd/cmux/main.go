@@ -63,11 +63,15 @@ func main() {
 	// hub is wired into sessionService as a broadcaster, and finally sessionService
 	// is injected back into wsHandler via SetService.
 	wsHandler := httpadapter.NewWebSocketHandler(nil, httpadapter.WithOriginPatterns([]string{"*"}))
-	sessionService := appservice.NewSessionService(repo, processManager, templateRepo,
+	sessionServiceOpts := []appservice.SessionServiceOption{
 		appservice.WithGitService(gitService, cfg.Git.WorktreesDir),
 		appservice.WithWorktreeRepository(worktreeRepo),
 		appservice.WithBroadcaster(wsHandler.Hub()),
-	)
+	}
+	if cfg.Claude.Model != "" {
+		sessionServiceOpts = append(sessionServiceOpts, appservice.WithClaudeModel(cfg.Claude.Model))
+	}
+	sessionService := appservice.NewSessionService(repo, processManager, templateRepo, sessionServiceOpts...)
 	wsHandler.SetService(sessionService)
 
 	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, gitService, cfg.Server.Port, wsHandler)

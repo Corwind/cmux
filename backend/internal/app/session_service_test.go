@@ -1741,6 +1741,140 @@ func TestProvisionWorktree_SyncMap_ConcurrentAccessNoPanic(t *testing.T) {
 	}
 }
 
+func TestCreateSession_WithClaudeModel_PassesModelArg(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm, nil, WithClaudeModel("claude-opus-4-8"))
+
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	args := pm.spawnArgs
+	modelIdx := -1
+	for i, arg := range args {
+		if arg == "--model" {
+			modelIdx = i
+			break
+		}
+	}
+	if modelIdx == -1 {
+		t.Fatalf("expected --model flag in spawn args, got %v", args)
+	}
+	if modelIdx+1 >= len(args) || args[modelIdx+1] != "claude-opus-4-8" {
+		t.Errorf("expected model value 'claude-opus-4-8' after --model, got %v", args)
+	}
+}
+
+func TestCreateSession_WithoutClaudeModel_NoModelArg(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm, nil)
+
+	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, arg := range pm.spawnArgs {
+		if arg == "--model" {
+			t.Errorf("did not expect --model flag in spawn args, got %v", pm.spawnArgs)
+		}
+	}
+}
+
+func TestResumeSession_WithClaudeModel_PassesModelArg(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm, nil, WithClaudeModel("claude-sonnet-4-6"))
+
+	created, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
+	if err != nil {
+		t.Fatalf("create session error: %v", err)
+	}
+
+	// Simulate process death so ResumeSession actually re-spawns
+	delete(pm.alive, created.PID)
+	// Reset tracked spawn args
+	pm.mu.Lock()
+	pm.spawnArgs = nil
+	pm.mu.Unlock()
+
+	_, err = svc.ResumeSession(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("resume session error: %v", err)
+	}
+
+	args := pm.spawnArgs
+	modelIdx := -1
+	for i, arg := range args {
+		if arg == "--model" {
+			modelIdx = i
+			break
+		}
+	}
+	if modelIdx == -1 {
+		t.Fatalf("expected --model flag in resume spawn args, got %v", args)
+	}
+	if modelIdx+1 >= len(args) || args[modelIdx+1] != "claude-sonnet-4-6" {
+		t.Errorf("expected model value 'claude-sonnet-4-6' after --model, got %v", args)
+	}
+}
+
+func TestCreateSession_WithWorktree_WithClaudeModel_PassesModelArg(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	git := newMockGitService()
+	svc := NewSessionService(repo, pm, nil,
+		WithGitService(git, "/tmp/worktrees"),
+		WithClaudeModel("claude-haiku-4-5"),
+	)
+
+	input := CreateSessionInput{
+		Name:       "test",
+		WorkingDir: "/tmp/repo",
+		Worktree: &WorktreeSpec{
+			Branch:       "feat/test",
+			CreateBranch: true,
+		},
+	}
+	_, err := svc.CreateSession(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Wait for provisioning goroutine to complete
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		pm.mu.Lock()
+		args := pm.spawnArgs
+		pm.mu.Unlock()
+		if args != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	pm.mu.Lock()
+	args := pm.spawnArgs
+	pm.mu.Unlock()
+
+	modelIdx := -1
+	for i, arg := range args {
+		if arg == "--model" {
+			modelIdx = i
+			break
+		}
+	}
+	if modelIdx == -1 {
+		t.Fatalf("expected --model flag in async spawn args, got %v", args)
+	}
+	if modelIdx+1 >= len(args) || args[modelIdx+1] != "claude-haiku-4-5" {
+		t.Errorf("expected model value 'claude-haiku-4-5' after --model, got %v", args)
+	}
+}
+
 // contains is a helper to check if a string contains a substring.
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||

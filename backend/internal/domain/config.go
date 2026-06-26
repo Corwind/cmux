@@ -5,6 +5,7 @@ type Config struct {
 	Sandbox SandboxConfig
 	Shell   ShellConfig
 	Git     GitConfig
+	Claude  ClaudeConfig
 	Env     map[string]string
 }
 
@@ -25,4 +26,8 @@ type ShellConfig struct {
 
 type GitConfig struct {
 	WorktreesDir string
+}
+
+type ClaudeConfig struct {
+	Model string
 }

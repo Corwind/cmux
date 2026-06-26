@@ -8,7 +8,7 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	// Unset all env vars that could affect the result
-	for _, key := range []string{"CMUX_CONFIG_PATH", "CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
+	for _, key := range []string{"CMUX_CONFIG_PATH", "CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL"} {
 		t.Setenv(key, "")
 	}
 	// Point config path to a non-existent file so no TOML is loaded
@@ -231,7 +231,7 @@ port = "4000"
 		t.Fatalf("write config file: %v", err)
 	}
 
-	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL"} {
 		t.Setenv(key, "")
 	}
 	t.Setenv("CMUX_CONFIG_PATH", configFile)
@@ -250,5 +250,80 @@ port = "4000"
 	}
 	if cfg.Sandbox.TemplateDir != "sandbox-profiles" {
 		t.Errorf("expected default template_dir 'sandbox-profiles', got %q", cfg.Sandbox.TemplateDir)
+	}
+	if cfg.Claude.Model != "" {
+		t.Errorf("expected empty claude model by default, got %q", cfg.Claude.Model)
+	}
+}
+
+func TestLoadClaudeModelFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[claude]
+model = "claude-opus-4-8"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Claude.Model != "claude-opus-4-8" {
+		t.Errorf("expected claude model 'claude-opus-4-8', got %q", cfg.Claude.Model)
+	}
+}
+
+func TestLoadClaudeModelFromEnvVar(t *testing.T) {
+	t.Setenv("CMUX_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.toml"))
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("CMUX_CLAUDE_MODEL", "claude-haiku-4-5")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Claude.Model != "claude-haiku-4-5" {
+		t.Errorf("expected claude model 'claude-haiku-4-5', got %q", cfg.Claude.Model)
+	}
+}
+
+func TestLoadClaudeModelTOMLOverridesEnvVar(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[claude]
+model = "claude-sonnet-4-6"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CLAUDE_MODEL", "claude-haiku-4-5")
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
+		t.Setenv(key, "")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Claude.Model != "claude-sonnet-4-6" {
+		t.Errorf("expected TOML claude model 'claude-sonnet-4-6' to override env var, got %q", cfg.Claude.Model)
 	}
 }
