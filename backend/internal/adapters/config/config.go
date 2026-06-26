@@ -15,7 +15,12 @@ type tomlConfig struct {
 	Sandbox tomlSandbox       `toml:"sandbox"`
 	Shell   tomlShell         `toml:"shell"`
 	Git     tomlGit           `toml:"git"`
+	Claude  tomlClaude        `toml:"claude"`
 	Env     map[string]string `toml:"env"`
+}
+
+type tomlClaude struct {
+	Model string `toml:"model"`
 }
 
 type tomlGit struct {
@@ -94,6 +99,9 @@ func applyEnvVars(cfg *domain.Config) {
 	if v := os.Getenv("CMUX_SANDBOX_TEMPLATES"); v != "" {
 		cfg.Sandbox.Templates = strings.Split(v, ",")
 	}
+	if v := os.Getenv("CMUX_CLAUDE_MODEL"); v != "" {
+		cfg.Claude.Model = v
+	}
 }
 
 func loadFile(path string, cfg *domain.Config) error {
@@ -134,6 +142,9 @@ func loadFile(path string, cfg *domain.Config) error {
 	}
 	if tc.Git.WorktreesDir != "" {
 		cfg.Git.WorktreesDir = tc.Git.WorktreesDir
+	}
+	if tc.Claude.Model != "" {
+		cfg.Claude.Model = tc.Claude.Model
 	}
 
 	return nil

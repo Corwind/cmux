@@ -52,6 +52,7 @@ type SessionService struct {
 	gitService     ports.GitService
 	worktreeRepo   ports.WorktreeRepository
 	worktreesDir   string
+	claudeModel    string
 	mu             sync.RWMutex
 	provisionCtxs  sync.Map // key: sessionID string, value: context.CancelFunc
 	deletionCtxs   sync.Map // key: worktreeID string, value: context.CancelFunc
@@ -93,6 +94,12 @@ func WithBroadcaster(b SessionEventBroadcaster) SessionServiceOption {
 	}
 }
 
+func WithClaudeModel(model string) SessionServiceOption {
+	return func(s *SessionService) {
+		s.claudeModel = model
+	}
+}
+
 func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionInput) (domain.Session, error) {
 	workingDir := input.WorkingDir
 
@@ -113,6 +120,9 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	args := []string{"--session-id", session.ClaudeSessionID}
 	if input.SkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
+	}
+	if s.claudeModel != "" {
+		args = append(args, "--model", s.claudeModel)
 	}
 	slog.Info("spawning session process", "session_id", session.ID, "working_dir", workingDir)
 	handle, err := s.processManager.Spawn(ctx, workingDir, args...)
@@ -227,6 +237,9 @@ func (s *SessionService) provisionWorktree(session domain.Session, input CreateS
 	if input.SkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
 	}
+	if s.claudeModel != "" {
+		args = append(args, "--model", s.claudeModel)
+	}
 
 	handle, err := s.processManager.Spawn(context.Background(), workingDir, args...)
 	if err != nil {
@@ -333,6 +346,9 @@ func (s *SessionService) ResumeSession(ctx context.Context, id string) (domain.S
 	args := []string{"--resume", session.ClaudeSessionID}
 	if session.SkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
+	}
+	if s.claudeModel != "" {
+		args = append(args, "--model", s.claudeModel)
 	}
 	handle, err := s.processManager.Spawn(ctx, session.WorkingDir, args...)
 	if err != nil {
