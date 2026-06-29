@@ -3,6 +3,7 @@ package filesystem
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/Corwind/cmux/backend/internal/ports"
@@ -25,10 +26,21 @@ func (b *Browser) ListDir(path string, showHidden bool) ([]ports.DirEntry, error
 		if !showHidden && entry.Name()[0] == '.' {
 			continue
 		}
-		result = append(result, ports.DirEntry{
-			Name:  entry.Name(),
-			IsDir: entry.IsDir(),
-		})
+
+		de := ports.DirEntry{Name: entry.Name()}
+		if entry.Type()&os.ModeSymlink != 0 {
+			de.IsSymlink = true
+			// os.Stat follows the symlink; an error means the target is
+			// unresolvable (broken link or inaccessible).
+			if target, statErr := os.Stat(filepath.Join(path, entry.Name())); statErr != nil {
+				de.IsBroken = true
+			} else {
+				de.IsDir = target.IsDir()
+			}
+		} else {
+			de.IsDir = entry.IsDir()
+		}
+		result = append(result, de)
 	}
 
 	sort.Slice(result, func(i, j int) bool {

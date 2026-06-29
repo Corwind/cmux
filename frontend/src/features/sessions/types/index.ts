@@ -33,6 +33,8 @@ export interface CreateSessionInput {
 export interface DirEntry {
   name: string;
   is_dir: boolean;
+  is_symlink?: boolean;
+  is_broken?: boolean;
 }
 
 export interface WorktreeEntry {

@@ -17,8 +17,10 @@ func NewFilesystemHandler(browser ports.FileBrowser) *FilesystemHandler {
 }
 
 type dirEntryResponse struct {
-	Name  string `json:"name"`
-	IsDir bool   `json:"is_dir"`
+	Name      string `json:"name"`
+	IsDir     bool   `json:"is_dir"`
+	IsSymlink bool   `json:"is_symlink,omitempty"`
+	IsBroken  bool   `json:"is_broken,omitempty"`
 }
 
 type listDirResponse struct {
@@ -47,8 +49,10 @@ func (h *FilesystemHandler) ListDirectory(w http.ResponseWriter, r *http.Request
 	var resp []dirEntryResponse
 	for _, e := range entries {
 		resp = append(resp, dirEntryResponse{
-			Name:  e.Name,
-			IsDir: e.IsDir,
+			Name:      e.Name,
+			IsDir:     e.IsDir,
+			IsSymlink: e.IsSymlink,
+			IsBroken:  e.IsBroken,
 		})
 	}
 
