@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@/test/test-utils";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
@@ -57,11 +57,33 @@ describe("SessionList", () => {
       expect(subtitle).toBeInTheDocument();
     });
 
-    it("button is disabled while provisioning", async () => {
+    it("row is not a disabled button, so the nested delete button stays clickable", async () => {
       render(<SessionList />);
       const listItem = await screen.findByText("Worktree Session");
       const button = listItem.closest("button");
-      expect(button).toBeDisabled();
+      // The row must NOT be a disabled <button>: a disabled parent button
+      // swallows clicks to the nested delete button, making stuck
+      // provisioning sessions impossible to remove from the sidebar.
+      expect(button).not.toBeDisabled();
+    });
+
+    it("shows a clickable delete button that fires the delete request", async () => {
+      let deletedId: string | null = null;
+      server.use(
+        http.delete("/api/sessions/:id", ({ params }) => {
+          deletedId = params.id as string;
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+
+      render(<SessionList />);
+      await screen.findByText("Worktree Session");
+
+      const deleteButton = screen.getByTitle("Delete session");
+      expect(deleteButton).not.toBeDisabled();
+      deleteButton.click();
+
+      await vi.waitFor(() => expect(deletedId).toBe("session-prov"));
     });
   });
 

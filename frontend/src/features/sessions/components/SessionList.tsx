@@ -57,7 +57,6 @@ export function SessionList() {
         <li key={session.id}>
           <button
             type="button"
-            disabled={session.status === "provisioning"}
             onClick={() => {
               if (
                 session.status === "provisioning" ||
@@ -67,7 +66,11 @@ export function SessionList() {
               setActiveSession(session.id);
               useNotificationStore.getState().clearNotification(session.id);
             }}
-            className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            className={`flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors ${
+              session.status === "provisioning"
+                ? "cursor-not-allowed opacity-60"
+                : ""
+            }`}
             style={{
               backgroundColor:
                 activeSessionId === session.id
