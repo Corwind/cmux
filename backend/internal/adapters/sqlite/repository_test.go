@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +17,70 @@ func setupTestRepo(t *testing.T) *Repository {
 		t.Fatalf("failed to create repository: %v", err)
 	}
 	return repo
+}
+
+func TestNewRepository_AppliesConcurrencyPragmas(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cmux.db")
+	repo, err := NewRepository(dbPath)
+	if err != nil {
+		t.Fatalf("NewRepository: %v", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	db := repo.DB()
+
+	if got := db.Stats().MaxOpenConnections; got != 1 {
+		t.Errorf("expected MaxOpenConnections=1, got %d", got)
+	}
+
+	var busyTimeout int
+	if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+		t.Fatalf("query busy_timeout: %v", err)
+	}
+	if busyTimeout < 5000 {
+		t.Errorf("expected busy_timeout >= 5000, got %d", busyTimeout)
+	}
+
+	var journalMode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		t.Fatalf("query journal_mode: %v", err)
+	}
+	if journalMode != "wal" {
+		t.Errorf("expected journal_mode=wal, got %q", journalMode)
+	}
+}
+
+// TestConcurrentWrites_NoBusyError exercises many concurrent writers to ensure
+// the busy_timeout + single-connection configuration prevents SQLITE_BUSY,
+// which previously left worktree-provisioned sessions stuck.
+func TestConcurrentWrites_NoBusyError(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cmux.db")
+	repo, err := NewRepository(dbPath)
+	if err != nil {
+		t.Fatalf("NewRepository: %v", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	ctx := context.Background()
+	const writers = 24
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			s := makeSession("concurrent")
+			s.ID = "sess-" + string(rune('a'+n%26)) + time.Now().Format("150405.000000000")
+			if err := repo.Create(ctx, s); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent write failed: %v", err)
+	}
 }
 
 func makeSession(name string) domain.Session {

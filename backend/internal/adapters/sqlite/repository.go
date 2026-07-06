@@ -27,13 +27,24 @@ func NewRepository(dbPath string) (*Repository, error) {
 		}
 	}
 
-	// Append foreign_keys pragma to the DSN so every connection in the pool
-	// has FK enforcement enabled, not just the first one.
-	dsn := dbPath + "?_pragma=foreign_keys(1)"
+	// DSN pragmas, applied to every connection in the pool:
+	//   - foreign_keys(1): enforce FK cascades (e.g. worktree session_id).
+	//   - busy_timeout(5000): wait up to 5s for a lock instead of failing
+	//     immediately with SQLITE_BUSY when writes contend (e.g. two session
+	//     provisioning goroutines linking worktrees concurrently).
+	//   - journal_mode(WAL): let readers proceed without blocking the writer.
+	dsn := dbPath + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+
+	// Serialize access to a single connection. cmux is a local single-user
+	// app with modest DB traffic; funnelling all queries through one
+	// connection eliminates writer-vs-writer SQLITE_BUSY contention entirely
+	// (and avoids the in-memory-DB footgun where each pool connection would
+	// otherwise get its own independent database).
+	db.SetMaxOpenConns(1)
 
 	if _, err := db.Exec(createSessionsTable); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)

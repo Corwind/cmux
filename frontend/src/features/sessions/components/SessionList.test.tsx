@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@/test/test-utils";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
@@ -57,11 +57,34 @@ describe("SessionList", () => {
       expect(subtitle).toBeInTheDocument();
     });
 
-    it("button is disabled while provisioning", async () => {
+    it("row is not a native <button>, so nested action buttons stay clickable", async () => {
       render(<SessionList />);
       const listItem = await screen.findByText("Worktree Session");
-      const button = listItem.closest("button");
-      expect(button).toBeDisabled();
+      // Nesting the delete <button> inside a row <button> is invalid HTML and
+      // the browser drops clicks on the inner button — which made stuck
+      // provisioning sessions impossible to delete. The row must therefore be
+      // a non-button element (div[role=button]).
+      expect(listItem.closest("button")).toBeNull();
+      expect(listItem.closest('[role="button"]')).not.toBeNull();
+    });
+
+    it("shows a clickable delete button that fires the delete request", async () => {
+      let deletedId: string | null = null;
+      server.use(
+        http.delete("/api/sessions/:id", ({ params }) => {
+          deletedId = params.id as string;
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+
+      render(<SessionList />);
+      await screen.findByText("Worktree Session");
+
+      const deleteButton = screen.getByTitle("Delete session");
+      expect(deleteButton).not.toBeDisabled();
+      deleteButton.click();
+
+      await vi.waitFor(() => expect(deletedId).toBe("session-prov"));
     });
   });
 
@@ -122,11 +145,13 @@ describe("SessionList", () => {
       mockSessions([runningSession]);
     });
 
-    it("button is not disabled for running session", async () => {
+    it("row is interactive (focusable, not aria-disabled) for a running session", async () => {
       render(<SessionList />);
       const sessionName = await screen.findByText("Running Session");
-      const button = sessionName.closest("button");
-      expect(button).not.toBeDisabled();
+      const row = sessionName.closest('[role="button"]');
+      expect(row).not.toBeNull();
+      expect(row).toHaveAttribute("tabindex", "0");
+      expect(row).toHaveAttribute("aria-disabled", "false");
     });
 
     it("shows restart button for running session", async () => {
