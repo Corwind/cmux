@@ -55,21 +55,39 @@ export function SessionList() {
     <ul className="space-y-1">
       {sessions.map((session) => (
         <li key={session.id}>
-          <button
-            type="button"
-            onClick={() => {
-              if (
-                session.status === "provisioning" ||
-                session.status === "failed"
-              )
-                return;
+          {/*
+            The row is a div (not a button) with role="button". The delete /
+            resume / restart controls are real <button>s nested inside the row;
+            nesting a button inside a button is invalid HTML and the browser
+            drops clicks on the inner buttons — which is why deleting a
+            provisioning session did nothing. A div row keeps those controls
+            valid and clickable in every state.
+          */}
+          {(() => {
+            const isInteractive =
+              session.status !== "provisioning" &&
+              session.status !== "failed";
+            const activate = () => {
+              if (!isInteractive) return;
               setActiveSession(session.id);
               useNotificationStore.getState().clearNotification(session.id);
+            };
+            return (
+          <div
+            role="button"
+            tabIndex={isInteractive ? 0 : -1}
+            aria-disabled={!isInteractive}
+            onClick={activate}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                activate();
+              }
             }}
             className={`flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors ${
               session.status === "provisioning"
                 ? "cursor-not-allowed opacity-60"
-                : ""
+                : "cursor-pointer"
             }`}
             style={{
               backgroundColor:
@@ -82,11 +100,7 @@ export function SessionList() {
                   : "var(--cmux-text-secondary)",
             }}
             onMouseEnter={(e) => {
-              if (
-                activeSessionId !== session.id &&
-                session.status !== "provisioning" &&
-                session.status !== "failed"
-              ) {
+              if (activeSessionId !== session.id && isInteractive) {
                 e.currentTarget.style.backgroundColor =
                   "var(--cmux-surface-hover)";
                 e.currentTarget.style.color = "var(--cmux-text)";
@@ -236,7 +250,9 @@ export function SessionList() {
                 </button>
               )}
             </div>
-          </button>
+          </div>
+            );
+          })()}
         </li>
       ))}
     </ul>

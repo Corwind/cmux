@@ -57,14 +57,15 @@ describe("SessionList", () => {
       expect(subtitle).toBeInTheDocument();
     });
 
-    it("row is not a disabled button, so the nested delete button stays clickable", async () => {
+    it("row is not a native <button>, so nested action buttons stay clickable", async () => {
       render(<SessionList />);
       const listItem = await screen.findByText("Worktree Session");
-      const button = listItem.closest("button");
-      // The row must NOT be a disabled <button>: a disabled parent button
-      // swallows clicks to the nested delete button, making stuck
-      // provisioning sessions impossible to remove from the sidebar.
-      expect(button).not.toBeDisabled();
+      // Nesting the delete <button> inside a row <button> is invalid HTML and
+      // the browser drops clicks on the inner button — which made stuck
+      // provisioning sessions impossible to delete. The row must therefore be
+      // a non-button element (div[role=button]).
+      expect(listItem.closest("button")).toBeNull();
+      expect(listItem.closest('[role="button"]')).not.toBeNull();
     });
 
     it("shows a clickable delete button that fires the delete request", async () => {
@@ -144,11 +145,13 @@ describe("SessionList", () => {
       mockSessions([runningSession]);
     });
 
-    it("button is not disabled for running session", async () => {
+    it("row is interactive (focusable, not aria-disabled) for a running session", async () => {
       render(<SessionList />);
       const sessionName = await screen.findByText("Running Session");
-      const button = sessionName.closest("button");
-      expect(button).not.toBeDisabled();
+      const row = sessionName.closest('[role="button"]');
+      expect(row).not.toBeNull();
+      expect(row).toHaveAttribute("tabindex", "0");
+      expect(row).toHaveAttribute("aria-disabled", "false");
     });
 
     it("shows restart button for running session", async () => {
