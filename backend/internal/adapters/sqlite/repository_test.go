@@ -453,6 +453,79 @@ func TestRepository_DeleteSession_ClearsWorktreeSessionID(t *testing.T) {
 	}
 }
 
+func TestRepository_HarnessTypeRoundTrip(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	s := makeSession("harness-sess")
+	s.HarnessType = "claude"
+
+	if err := repo.Create(ctx, s); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := repo.Get(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.HarnessType != "claude" {
+		t.Errorf("expected HarnessType %q, got %q", "claude", got.HarnessType)
+	}
+}
+
+func TestRepository_HarnessType_BackfillsPreMigrationRows(t *testing.T) {
+	// Simulate an "old" pre-migration row by inserting directly via raw SQL,
+	// bypassing Create() and explicitly setting harness_type to the empty
+	// string default that existed before this column was backfilled.
+	dbPath := filepath.Join(t.TempDir(), "cmux.db")
+	repo, err := NewRepository(dbPath)
+	if err != nil {
+		t.Fatalf("NewRepository failed: %v", err)
+	}
+
+	now := time.Now()
+	if _, err := repo.DB().Exec(
+		"INSERT INTO sessions (id, name, working_dir, status, pid, claude_session_id, harness_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)",
+		"pre-migration-sess", "old-sess", "/tmp", "stopped", 0, "old-claude-session-id", now, now,
+	); err != nil {
+		t.Fatalf("failed to insert pre-migration row: %v", err)
+	}
+
+	var harnessType string
+	if err := repo.DB().QueryRow("SELECT harness_type FROM sessions WHERE id = ?", "pre-migration-sess").Scan(&harnessType); err != nil {
+		t.Fatalf("failed to query harness_type before reopen: %v", err)
+	}
+	if harnessType != "" {
+		t.Fatalf("expected empty harness_type before backfill, got %q", harnessType)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("failed to close repository: %v", err)
+	}
+
+	// Reopening the repository re-runs NewRepository's migrations, including
+	// the backfill UPDATE, which should populate harness_type for the
+	// pre-existing row without touching any other column.
+	repo2, err := NewRepository(dbPath)
+	if err != nil {
+		t.Fatalf("second NewRepository failed: %v", err)
+	}
+	defer func() { _ = repo2.Close() }()
+
+	got, err := repo2.Get(context.Background(), "pre-migration-sess")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.HarnessType != "claude" {
+		t.Errorf("expected backfilled HarnessType %q, got %q", "claude", got.HarnessType)
+	}
+	if got.HarnessSessionID != "old-claude-session-id" {
+		t.Errorf("expected untouched HarnessSessionID %q, got %q", "old-claude-session-id", got.HarnessSessionID)
+	}
+	if got.Name != "old-sess" {
+		t.Errorf("expected untouched Name %q, got %q", "old-sess", got.Name)
+	}
+}
+
 func TestRepository_ListOrderByCreatedAtDesc(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()

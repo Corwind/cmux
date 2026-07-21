@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
+	"github.com/Corwind/cmux/backend/internal/harness"
 	"github.com/Corwind/cmux/backend/internal/ports"
 	"github.com/google/uuid"
 )
@@ -52,7 +53,7 @@ type SessionService struct {
 	gitService     ports.GitService
 	worktreeRepo   ports.WorktreeRepository
 	worktreesDir   string
-	claudeModel    string
+	harness        harness.Harness
 	mu             sync.RWMutex
 	provisionCtxs  sync.Map // key: sessionID string, value: context.CancelFunc
 	deletionCtxs   sync.Map // key: worktreeID string, value: context.CancelFunc
@@ -67,6 +68,11 @@ func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, te
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	// Callers (mainly tests) that don't inject a harness via WithHarness get the
+	// same Claude behavior as before this package existed, with no model set.
+	if s.harness == nil {
+		s.harness = harness.NewClaudeHarness(domain.ClaudeConfig{})
 	}
 	return s
 }
@@ -94,9 +100,11 @@ func WithBroadcaster(b SessionEventBroadcaster) SessionServiceOption {
 	}
 }
 
-func WithClaudeModel(model string) SessionServiceOption {
+// WithHarness injects the coding-agent harness strategy used to build spawn
+// arguments and mint the harness type recorded on new sessions.
+func WithHarness(h harness.Harness) SessionServiceOption {
 	return func(s *SessionService) {
-		s.claudeModel = model
+		s.harness = h
 	}
 }
 
@@ -108,7 +116,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	}
 
 	// --- Synchronous path (no worktree) ---
-	session, err := domain.NewSession(input.Name, workingDir)
+	session, err := domain.NewSession(input.Name, workingDir, string(s.harness.Type()))
 	if err != nil {
 		slog.Error("invalid session parameters", "name", input.Name, "working_dir", workingDir, "err", err)
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
@@ -117,13 +125,10 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	// Resolve sandbox template content
 	s.applySandboxContent(ctx, input.TemplateID)
 
-	args := []string{"--session-id", session.ClaudeSessionID}
-	if input.SkipPermissions {
-		args = append(args, "--dangerously-skip-permissions")
-	}
-	if s.claudeModel != "" {
-		args = append(args, "--model", s.claudeModel)
-	}
+	args := s.harness.BuildSpawnArgs(harness.SpawnIntent{
+		SessionID:       session.HarnessSessionID,
+		SkipPermissions: input.SkipPermissions,
+	})
 	slog.Info("spawning session process", "session_id", session.ID, "working_dir", workingDir)
 	handle, err := s.processManager.Spawn(ctx, workingDir, args...)
 	if err != nil {
@@ -176,7 +181,7 @@ func (s *SessionService) createSessionAsync(ctx context.Context, input CreateSes
 	}
 
 	// Create session with StatusProvisioning
-	session, err := domain.NewSession(input.Name, wtPath)
+	session, err := domain.NewSession(input.Name, wtPath, string(s.harness.Type()))
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
 	}
@@ -233,13 +238,10 @@ func (s *SessionService) provisionWorktree(session domain.Session, input CreateS
 	// Resolve sandbox template
 	s.applySandboxContent(provCtx, input.TemplateID)
 
-	args := []string{"--session-id", session.ClaudeSessionID}
-	if input.SkipPermissions {
-		args = append(args, "--dangerously-skip-permissions")
-	}
-	if s.claudeModel != "" {
-		args = append(args, "--model", s.claudeModel)
-	}
+	args := s.harness.BuildSpawnArgs(harness.SpawnIntent{
+		SessionID:       session.HarnessSessionID,
+		SkipPermissions: input.SkipPermissions,
+	})
 
 	handle, err := s.processManager.Spawn(context.Background(), workingDir, args...)
 	if err != nil {
@@ -343,13 +345,11 @@ func (s *SessionService) ResumeSession(ctx context.Context, id string) (domain.S
 	// Reapply the sandbox template that was used when the session was created
 	s.applySandboxContent(ctx, session.TemplateID)
 
-	args := []string{"--resume", session.ClaudeSessionID}
-	if session.SkipPermissions {
-		args = append(args, "--dangerously-skip-permissions")
-	}
-	if s.claudeModel != "" {
-		args = append(args, "--model", s.claudeModel)
-	}
+	args := s.harness.BuildSpawnArgs(harness.SpawnIntent{
+		SessionID:       session.HarnessSessionID,
+		Resume:          s.harness.HasResumeSupport(),
+		SkipPermissions: session.SkipPermissions,
+	})
 	handle, err := s.processManager.Spawn(ctx, session.WorkingDir, args...)
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("failed to resume process: %w", err)

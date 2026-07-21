@@ -11,6 +11,11 @@ func TestBuildBasicProfile(t *testing.T) {
 	cfg := ProfileConfig{
 		WorkingDir: "/tmp/project",
 		HomeDir:    "/Users/testuser",
+		PathGrants: []PathGrant{
+			{Path: "$HOME/.claude.json", Recursive: false, Write: true},
+			{Path: "$HOME/.claude", Recursive: true, Write: true},
+			{Path: "$HOME/.config", Recursive: true, Write: true},
+		},
 	}
 
 	profile, err := pb.Build(cfg)
@@ -151,6 +156,9 @@ func TestBuildAutoResolvesHomeDir(t *testing.T) {
 	cfg := ProfileConfig{
 		WorkingDir: "/tmp/project",
 		// HomeDir intentionally empty - should auto-resolve
+		PathGrants: []PathGrant{
+			{Path: "$HOME/.claude", Recursive: true, Write: true},
+		},
 	}
 
 	profile, err := pb.Build(cfg)
@@ -290,6 +298,40 @@ func TestBuildWithExtraWritePaths(t *testing.T) {
 	}
 }
 
+func TestBuildWithPathGrants(t *testing.T) {
+	pb := NewProfileBuilder(testdataDir(t))
+
+	cfg := ProfileConfig{
+		WorkingDir: "/tmp/project",
+		HomeDir:    "/Users/testuser",
+		PathGrants: []PathGrant{
+			{Path: "$HOME/.claude.json", Recursive: false, Write: true},
+			{Path: "$HOME/.claude", Recursive: true, Write: true},
+			{Path: "$HOME/.config", Recursive: true, Write: true},
+		},
+	}
+
+	profile, err := pb.Build(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	requiredFragments := []string{
+		`(allow file-read* (literal (string-append (param "HOME_DIR") "/.claude.json")))`,
+		`(allow file-write* (literal (string-append (param "HOME_DIR") "/.claude.json")))`,
+		`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.claude")))`,
+		`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))`,
+		`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.config")))`,
+		`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.config")))`,
+	}
+
+	for _, frag := range requiredFragments {
+		if !strings.Contains(profile, frag) {
+			t.Errorf("profile missing required fragment for path grant: %s", frag)
+		}
+	}
+}
+
 func TestBuildWithExtraWritePaths_QuotesSpecialChars(t *testing.T) {
 	pb := NewProfileBuilder(testdataDir(t))
 
@@ -309,4 +351,3 @@ func TestBuildWithExtraWritePaths_QuotesSpecialChars(t *testing.T) {
 		t.Errorf("profile should escape double-quotes in paths; got profile:\n%s", profile)
 	}
 }
-

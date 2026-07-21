@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Corwind/cmux/backend/internal/app"
+	"github.com/Corwind/cmux/backend/internal/harness"
 	"github.com/Corwind/cmux/backend/internal/ports"
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
@@ -40,6 +41,7 @@ type WebSocketHandler struct {
 	mu             sync.Mutex
 	bridges        map[string]*ptyBridge
 	originPatterns []string
+	harness        harness.Harness
 }
 
 type WebSocketOption func(*WebSocketHandler)
@@ -47,6 +49,14 @@ type WebSocketOption func(*WebSocketHandler)
 func WithOriginPatterns(patterns []string) WebSocketOption {
 	return func(h *WebSocketHandler) {
 		h.originPatterns = patterns
+	}
+}
+
+// WithHarness wires the harness strategy used to detect and parse
+// notification sequences in PTY output.
+func WithHarness(h harness.Harness) WebSocketOption {
+	return func(wh *WebSocketHandler) {
+		wh.harness = h
 	}
 }
 
@@ -117,17 +127,19 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 			data := make([]byte, n)
 			copy(data, buf[:n])
 
-			if msg, eventType, ok := parseOscNotification(data); ok {
-				name := sessionID
-				if session, sErr := h.service.GetSession(context.Background(), sessionID); sErr == nil {
-					name = session.Name
+			if h.harness != nil && h.harness.HasNotificationSupport() {
+				if result, ok := h.harness.ParseNotification(data); ok {
+					name := sessionID
+					if session, sErr := h.service.GetSession(context.Background(), sessionID); sErr == nil {
+						name = session.Name
+					}
+					h.hub.broadcast(sessionNotificationMsg{
+						SessionID:   sessionID,
+						SessionName: name,
+						Message:     result.Message,
+						EventType:   result.EventType,
+					})
 				}
-				h.hub.broadcast(sessionNotificationMsg{
-					SessionID:   sessionID,
-					SessionName: name,
-					Message:     msg,
-					EventType:   eventType,
-				})
 			}
 
 			if conn := bridge.getConn(); conn != nil {

@@ -5,7 +5,7 @@ import (
 )
 
 func TestNewSession_Valid(t *testing.T) {
-	s, err := NewSession("my-session", "/tmp")
+	s, err := NewSession("my-session", "/tmp", "claude")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -30,7 +30,7 @@ func TestNewSession_Valid(t *testing.T) {
 }
 
 func TestNewSession_EmptyName_DefaultsToDirectoryBasename(t *testing.T) {
-	s, err := NewSession("", "/home/user/my-project")
+	s, err := NewSession("", "/home/user/my-project", "claude")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -40,17 +40,27 @@ func TestNewSession_EmptyName_DefaultsToDirectoryBasename(t *testing.T) {
 }
 
 func TestNewSession_EmptyWorkingDir(t *testing.T) {
-	_, err := NewSession("my-session", "")
+	_, err := NewSession("my-session", "", "claude")
 	if err == nil {
 		t.Fatal("expected error for empty working directory")
 	}
 }
 
 func TestNewSession_UniqueIDs(t *testing.T) {
-	s1, _ := NewSession("a", "/tmp")
-	s2, _ := NewSession("b", "/tmp")
+	s1, _ := NewSession("a", "/tmp", "claude")
+	s2, _ := NewSession("b", "/tmp", "claude")
 	if s1.ID == s2.ID {
 		t.Error("expected unique IDs for different sessions")
+	}
+}
+
+func TestNewSession_SetsHarnessType(t *testing.T) {
+	s, err := NewSession("my-session", "/tmp", "claude")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if s.HarnessType != "claude" {
+		t.Errorf("expected harness type 'claude', got %q", s.HarnessType)
 	}
 }
 
@@ -67,7 +77,7 @@ func TestSessionStatus_FailedConstant(t *testing.T) {
 }
 
 func TestSession_ErrorFieldDefaultsEmpty(t *testing.T) {
-	s, err := NewSession("test", "/tmp")
+	s, err := NewSession("test", "/tmp", "claude")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,7 +87,7 @@ func TestSession_ErrorFieldDefaultsEmpty(t *testing.T) {
 }
 
 func TestSession_ErrorFieldCanBeSet(t *testing.T) {
-	s, _ := NewSession("test", "/tmp")
+	s, _ := NewSession("test", "/tmp", "claude")
 	s.Error = "worktree creation failed: git error"
 	if s.Error != "worktree creation failed: git error" {
 		t.Errorf("expected error message to be set, got %q", s.Error)
@@ -85,7 +95,7 @@ func TestSession_ErrorFieldCanBeSet(t *testing.T) {
 }
 
 func TestSession_ProvisioningStatus(t *testing.T) {
-	s, _ := NewSession("test", "/tmp")
+	s, _ := NewSession("test", "/tmp", "claude")
 	s.Status = StatusProvisioning
 	if s.Status != StatusProvisioning {
 		t.Errorf("expected status %q, got %q", StatusProvisioning, s.Status)
@@ -93,7 +103,7 @@ func TestSession_ProvisioningStatus(t *testing.T) {
 }
 
 func TestSession_FailedStatusWithError(t *testing.T) {
-	s, _ := NewSession("test", "/tmp")
+	s, _ := NewSession("test", "/tmp", "claude")
 	s.Status = StatusFailed
 	s.Error = "something went wrong"
 	if s.Status != StatusFailed {
