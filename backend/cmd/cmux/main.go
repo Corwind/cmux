@@ -19,6 +19,7 @@ import (
 	"github.com/Corwind/cmux/backend/internal/adapters/pty/sandbox"
 	"github.com/Corwind/cmux/backend/internal/adapters/sqlite"
 	appservice "github.com/Corwind/cmux/backend/internal/app"
+	"github.com/Corwind/cmux/backend/internal/harness"
 )
 
 func main() {
@@ -47,7 +48,10 @@ func main() {
 	envCache := configadapter.NewEnvCache(func() []string {
 		return configadapter.ResolveShellEnv(cfg)
 	}, 5*time.Minute)
-	managerOpts := []pty.Option{pty.WithSandbox(builder), pty.WithEnvResolver(envCache.Get)}
+	claudeHarness := harness.NewClaudeHarness(cfg.Claude)
+	registry := harness.NewRegistry(claudeHarness)
+
+	managerOpts := []pty.Option{pty.WithSandbox(builder), pty.WithEnvResolver(envCache.Get), pty.WithHarness(registry.Default())}
 
 	if len(cfg.Sandbox.Templates) > 0 {
 		managerOpts = append(managerOpts, pty.WithSandboxTemplates(cfg.Sandbox.Templates...))
@@ -62,14 +66,12 @@ func main() {
 	// Break circular dependency: wsHandler needs the hub created first, then the
 	// hub is wired into sessionService as a broadcaster, and finally sessionService
 	// is injected back into wsHandler via SetService.
-	wsHandler := httpadapter.NewWebSocketHandler(nil, httpadapter.WithOriginPatterns([]string{"*"}))
+	wsHandler := httpadapter.NewWebSocketHandler(nil, httpadapter.WithOriginPatterns([]string{"*"}), httpadapter.WithHarness(registry.Default()))
 	sessionServiceOpts := []appservice.SessionServiceOption{
 		appservice.WithGitService(gitService, cfg.Git.WorktreesDir),
 		appservice.WithWorktreeRepository(worktreeRepo),
 		appservice.WithBroadcaster(wsHandler.Hub()),
-	}
-	if cfg.Claude.Model != "" {
-		sessionServiceOpts = append(sessionServiceOpts, appservice.WithClaudeModel(cfg.Claude.Model))
+		appservice.WithHarness(registry.Default()),
 	}
 	sessionService := appservice.NewSessionService(repo, processManager, templateRepo, sessionServiceOpts...)
 	wsHandler.SetService(sessionService)

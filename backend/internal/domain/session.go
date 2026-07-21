@@ -18,23 +18,24 @@ const (
 )
 
 type Session struct {
-	ID              string
-	Name            string
-	WorkingDir      string
-	Status          SessionStatus
-	PID             int
-	ClaudeSessionID string
-	TemplateID      string
-	SkipPermissions bool
-	RepoRoot        string
-	GitBranch       string
-	WorktreeManaged bool
-	Error           string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID               string
+	Name             string
+	WorkingDir       string
+	Status           SessionStatus
+	PID              int
+	HarnessSessionID string
+	HarnessType      string
+	TemplateID       string
+	SkipPermissions  bool
+	RepoRoot         string
+	GitBranch        string
+	WorktreeManaged  bool
+	Error            string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
-func NewSession(name, workingDir string) (Session, error) {
+func NewSession(name, workingDir, harnessType string) (Session, error) {
 	if workingDir == "" {
 		return Session{}, fmt.Errorf("working directory cannot be empty")
 	}
@@ -45,12 +46,13 @@ func NewSession(name, workingDir string) (Session, error) {
 
 	now := time.Now()
 	return Session{
-		ID:              uuid.New().String(),
-		Name:            name,
-		WorkingDir:      workingDir,
-		Status:          StatusStopped,
-		ClaudeSessionID: uuid.New().String(),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:               uuid.New().String(),
+		Name:             name,
+		WorkingDir:       workingDir,
+		Status:           StatusStopped,
+		HarnessSessionID: uuid.New().String(),
+		HarnessType:      harnessType,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}, nil
 }

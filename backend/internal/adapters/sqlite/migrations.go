@@ -35,6 +35,10 @@ ALTER TABLE sessions ADD COLUMN worktree_managed INTEGER NOT NULL DEFAULT 0;
 
 const addErrorToSessions = "ALTER TABLE sessions ADD COLUMN error TEXT NOT NULL DEFAULT ''"
 
+const addHarnessTypeToSessions = "ALTER TABLE sessions ADD COLUMN harness_type TEXT NOT NULL DEFAULT ''"
+
+const backfillHarnessTypeOnSessions = "UPDATE sessions SET harness_type = 'claude' WHERE harness_type = ''"
+
 const createWorktreesTable = `
 CREATE TABLE IF NOT EXISTS worktrees (
 	id TEXT PRIMARY KEY,

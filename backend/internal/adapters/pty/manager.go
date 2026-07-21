@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/Corwind/cmux/backend/internal/adapters/pty/sandbox"
+	"github.com/Corwind/cmux/backend/internal/harness"
 	"github.com/Corwind/cmux/backend/internal/ports"
 	ptylib "github.com/creack/pty/v2"
 )
@@ -27,6 +28,17 @@ type Option func(*Manager)
 func WithCommand(command string) Option {
 	return func(m *Manager) {
 		m.command = command
+		m.commandExplicit = true
+	}
+}
+
+// WithHarness sets the Harness used to source binary name, spawn env
+// overrides, open-URL-wrapper requirement, and sandbox path grants. If unset
+// (nil), Manager falls back to the pre-harness hardcoded Claude-specific
+// defaults.
+func WithHarness(h harness.Harness) Option {
+	return func(m *Manager) {
+		m.harness = h
 	}
 }
 
@@ -64,12 +76,14 @@ type Manager struct {
 	mu               sync.RWMutex
 	processes        map[int]*managedProcess
 	command          string
+	commandExplicit  bool
 	fixedArgs        []string
 	baseEnv          []string
 	envResolver      func() []string
 	sandboxBuilder   *sandbox.ProfileBuilder
 	sandboxTemplates []string
 	sandboxContent   []string
+	harness          harness.Harness
 }
 
 func NewManager(opts ...Option) *Manager {
@@ -104,7 +118,7 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 		}
 		cmd = sandboxCmd
 	} else {
-		cmd = exec.Command(m.command, spawnArgs...)
+		cmd = exec.Command(m.binaryName(), spawnArgs...)
 	}
 
 	cmd.Dir = resolvedDir
@@ -126,14 +140,31 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	env = append(env, "GHOSTTY_RESOURCES_DIR=/Applications/Ghostty.app/Contents/Resources")
 	env = append(env, "LANG=en_US.UTF-8")
 
+	// Harness-specific env overrides, applied on top of the generic
+	// terminal-spoofing block above.
+	if m.harness != nil {
+		stripKeys, setVars := m.harness.EnvOverrides()
+		for _, key := range stripKeys {
+			env = filterEnv(env, key)
+		}
+		for key, value := range setVars {
+			env = filterEnv(env, key)
+			env = append(env, key+"="+value)
+		}
+	}
+
 	// Install a per-session `open` wrapper so sandboxed Claude can open URLs
 	// in the host browser via POST /api/open (Apple Events are blocked inside
 	// sandbox-exec, so the real /usr/bin/open can't communicate with the browser).
-	wrapperDir, wrapErr := installOpenWrapper(env)
-	if wrapErr != nil {
-		slog.Warn("failed to install open wrapper", "err", wrapErr)
-	} else {
-		env = prependToPath(env, wrapperDir)
+	var wrapperDir string
+	if m.harness == nil || m.harness.NeedsOpenURLWrapper() {
+		var wrapErr error
+		wrapperDir, wrapErr = installOpenWrapper(env)
+		if wrapErr != nil {
+			slog.Warn("failed to install open wrapper", "err", wrapErr)
+		} else {
+			env = prependToPath(env, wrapperDir)
+		}
 	}
 
 	cmd.Env = env
@@ -162,6 +193,19 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	m.mu.Unlock()
 
 	return handle, nil
+}
+
+// binaryName resolves the executable to spawn: an explicit WithCommand
+// override always wins, then a wired Harness's BinaryName, then the
+// hardcoded "claude" default.
+func (m *Manager) binaryName() string {
+	if m.commandExplicit {
+		return m.command
+	}
+	if m.harness != nil {
+		return m.harness.BinaryName()
+	}
+	return m.command
 }
 
 func filterEnv(env []string, exclude string) []string {
@@ -310,6 +354,24 @@ func (m *Manager) buildSandboxCommand(workingDir string, originalArgs []string) 
 		}
 	}
 
+	// Harness-specific config paths that need write access inside the sandbox.
+	if m.harness != nil && m.harness.HasSandboxPathGrants() {
+		for _, grant := range m.harness.SandboxPathGrants() {
+			cfg.PathGrants = append(cfg.PathGrants, sandbox.PathGrant{
+				Path:      grant.Path,
+				Recursive: grant.Recursive,
+				Write:     grant.Write,
+			})
+		}
+	} else if m.harness == nil {
+		// Claude Code config paths that need write access inside the sandbox.
+		cfg.PathGrants = []sandbox.PathGrant{
+			{Path: "$HOME/.claude.json", Recursive: false, Write: true},
+			{Path: "$HOME/.claude", Recursive: true, Write: true},
+			{Path: "$HOME/.config", Recursive: true, Write: true},
+		}
+	}
+
 	var profile string
 	var err error
 
@@ -335,7 +397,7 @@ func (m *Manager) buildSandboxCommand(workingDir string, originalArgs []string) 
 	for key, value := range params {
 		sandboxArgs = append(sandboxArgs, "-D", key+"="+value)
 	}
-	sandboxArgs = append(sandboxArgs, m.command)
+	sandboxArgs = append(sandboxArgs, m.binaryName())
 	sandboxArgs = append(sandboxArgs, originalArgs...)
 
 	return exec.Command("sandbox-exec", sandboxArgs...), nil

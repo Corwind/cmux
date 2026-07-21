@@ -106,13 +106,25 @@ func NewRepository(dbPath string) (*Repository, error) {
 		}
 	}
 
+	// Add harness_type column if it doesn't exist (idempotent migration)
+	if _, err := db.Exec(addHarnessTypeToSessions); err != nil {
+		if !isDuplicateColumnError(err) {
+			return nil, fmt.Errorf("failed to add harness_type column: %w", err)
+		}
+	}
+
+	// Backfill harness_type for rows created before the column existed
+	if _, err := db.Exec(backfillHarnessTypeOnSessions); err != nil {
+		return nil, fmt.Errorf("failed to backfill harness_type column: %w", err)
+	}
+
 	return &Repository{db: db}, nil
 }
 
 func (r *Repository) Create(ctx context.Context, session domain.Session) error {
 	_, err := r.db.ExecContext(ctx,
-		"INSERT INTO sessions (id, name, working_dir, status, pid, claude_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		session.ID, session.Name, session.WorkingDir, session.Status, session.PID, session.ClaudeSessionID, session.TemplateID, session.SkipPermissions, session.RepoRoot, session.GitBranch, session.WorktreeManaged, session.Error, session.CreatedAt, session.UpdatedAt,
+		"INSERT INTO sessions (id, name, working_dir, status, pid, claude_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, harness_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		session.ID, session.Name, session.WorkingDir, session.Status, session.PID, session.HarnessSessionID, session.TemplateID, session.SkipPermissions, session.RepoRoot, session.GitBranch, session.WorktreeManaged, session.Error, session.HarnessType, session.CreatedAt, session.UpdatedAt,
 	)
 	return err
 }
@@ -120,8 +132,8 @@ func (r *Repository) Create(ctx context.Context, session domain.Session) error {
 func (r *Repository) Get(ctx context.Context, id string) (domain.Session, error) {
 	var s domain.Session
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, name, working_dir, status, pid, claude_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, created_at, updated_at FROM sessions WHERE id = ?", id,
-	).Scan(&s.ID, &s.Name, &s.WorkingDir, &s.Status, &s.PID, &s.ClaudeSessionID, &s.TemplateID, &s.SkipPermissions, &s.RepoRoot, &s.GitBranch, &s.WorktreeManaged, &s.Error, &s.CreatedAt, &s.UpdatedAt)
+		"SELECT id, name, working_dir, status, pid, claude_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, harness_type, created_at, updated_at FROM sessions WHERE id = ?", id,
+	).Scan(&s.ID, &s.Name, &s.WorkingDir, &s.Status, &s.PID, &s.HarnessSessionID, &s.TemplateID, &s.SkipPermissions, &s.RepoRoot, &s.GitBranch, &s.WorktreeManaged, &s.Error, &s.HarnessType, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return domain.Session{}, fmt.Errorf("session not found: %s", id)
 	}
@@ -130,7 +142,7 @@ func (r *Repository) Get(ctx context.Context, id string) (domain.Session, error)
 
 func (r *Repository) List(ctx context.Context) ([]domain.Session, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, working_dir, status, pid, claude_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, created_at, updated_at FROM sessions ORDER BY created_at DESC",
+		"SELECT id, name, working_dir, status, pid, claude_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, harness_type, created_at, updated_at FROM sessions ORDER BY created_at DESC",
 	)
 	if err != nil {
 		return nil, err
@@ -140,7 +152,7 @@ func (r *Repository) List(ctx context.Context) ([]domain.Session, error) {
 	var sessions []domain.Session
 	for rows.Next() {
 		var s domain.Session
-		if err := rows.Scan(&s.ID, &s.Name, &s.WorkingDir, &s.Status, &s.PID, &s.ClaudeSessionID, &s.TemplateID, &s.SkipPermissions, &s.RepoRoot, &s.GitBranch, &s.WorktreeManaged, &s.Error, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.WorkingDir, &s.Status, &s.PID, &s.HarnessSessionID, &s.TemplateID, &s.SkipPermissions, &s.RepoRoot, &s.GitBranch, &s.WorktreeManaged, &s.Error, &s.HarnessType, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		sessions = append(sessions, s)
@@ -150,8 +162,8 @@ func (r *Repository) List(ctx context.Context) ([]domain.Session, error) {
 
 func (r *Repository) Update(ctx context.Context, session domain.Session) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE sessions SET name = ?, working_dir = ?, status = ?, pid = ?, claude_session_id = ?, template_id = ?, skip_permissions = ?, repo_root = ?, git_branch = ?, worktree_managed = ?, error = ?, updated_at = ? WHERE id = ?",
-		session.Name, session.WorkingDir, session.Status, session.PID, session.ClaudeSessionID, session.TemplateID, session.SkipPermissions, session.RepoRoot, session.GitBranch, session.WorktreeManaged, session.Error, session.UpdatedAt, session.ID,
+		"UPDATE sessions SET name = ?, working_dir = ?, status = ?, pid = ?, claude_session_id = ?, template_id = ?, skip_permissions = ?, repo_root = ?, git_branch = ?, worktree_managed = ?, error = ?, harness_type = ?, updated_at = ? WHERE id = ?",
+		session.Name, session.WorkingDir, session.Status, session.PID, session.HarnessSessionID, session.TemplateID, session.SkipPermissions, session.RepoRoot, session.GitBranch, session.WorktreeManaged, session.Error, session.HarnessType, session.UpdatedAt, session.ID,
 	)
 	return err
 }

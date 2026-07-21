@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
+	"github.com/Corwind/cmux/backend/internal/harness"
 	"github.com/Corwind/cmux/backend/internal/ports"
 )
 
@@ -1744,7 +1745,7 @@ func TestProvisionWorktree_SyncMap_ConcurrentAccessNoPanic(t *testing.T) {
 func TestCreateSession_WithClaudeModel_PassesModelArg(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm, nil, WithClaudeModel("claude-opus-4-8"))
+	svc := NewSessionService(repo, pm, nil, WithHarness(harness.NewClaudeHarness(domain.ClaudeConfig{Model: "claude-opus-4-8"})))
 
 	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
 	if err != nil {
@@ -1787,7 +1788,7 @@ func TestCreateSession_WithoutClaudeModel_NoModelArg(t *testing.T) {
 func TestResumeSession_WithClaudeModel_PassesModelArg(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm, nil, WithClaudeModel("claude-sonnet-4-6"))
+	svc := NewSessionService(repo, pm, nil, WithHarness(harness.NewClaudeHarness(domain.ClaudeConfig{Model: "claude-sonnet-4-6"})))
 
 	created, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
 	if err != nil {
@@ -1828,7 +1829,7 @@ func TestCreateSession_WithWorktree_WithClaudeModel_PassesModelArg(t *testing.T)
 	git := newMockGitService()
 	svc := NewSessionService(repo, pm, nil,
 		WithGitService(git, "/tmp/worktrees"),
-		WithClaudeModel("claude-haiku-4-5"),
+		WithHarness(harness.NewClaudeHarness(domain.ClaudeConfig{Model: "claude-haiku-4-5"})),
 	)
 
 	input := CreateSessionInput{

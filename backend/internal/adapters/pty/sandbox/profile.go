@@ -6,12 +6,23 @@ import (
 	"strings"
 )
 
+// PathGrant describes a filesystem path grant to add to the sandbox profile,
+// in addition to the base rules. Path may contain the literal substring
+// "$HOME", which is substituted with the actual home directory (via the
+// same "HOME_DIR" param mechanism used elsewhere in this file).
+type PathGrant struct {
+	Path      string
+	Recursive bool
+	Write     bool
+}
+
 // ProfileConfig holds the parameters for building a sandbox profile.
 type ProfileConfig struct {
 	WorkingDir      string
 	TemplateNames   []string
 	HomeDir         string
 	ExtraWritePaths []string
+	PathGrants      []PathGrant
 }
 
 // ProfileBuilder assembles SBPL sandbox profiles from a base set of rules
@@ -41,7 +52,7 @@ func (pb *ProfileBuilder) Build(cfg ProfileConfig) (string, error) {
 		}
 		templateFragments = append(templateFragments, ";; template: "+name+"\n"+tmpl.Content)
 	}
-	return buildProfile(templateFragments, cfg.ExtraWritePaths), nil
+	return buildProfile(templateFragments, cfg.ExtraWritePaths, cfg.PathGrants), nil
 }
 
 // Params returns the parameter map for sandbox-exec -D flags.
@@ -59,7 +70,7 @@ func (pb *ProfileBuilder) Params(cfg ProfileConfig) map[string]string {
 
 // buildProfile assembles the complete SBPL profile with deny-by-default,
 // minimal system access, working directory read/write, and template fragments.
-func buildProfile(templateFragments []string, extraWritePaths []string) string {
+func buildProfile(templateFragments []string, extraWritePaths []string, pathGrants []PathGrant) string {
 	var b strings.Builder
 
 	b.WriteString("(version 1)\n")
@@ -113,8 +124,6 @@ func buildProfile(templateFragments []string, extraWritePaths []string) string {
 
 	// Home directory — only specific subdirs needed by Claude Code and its toolchain
 	b.WriteString("\n;; home directory (selective read-only)\n")
-	b.WriteString(`(allow file-read* (literal (string-append (param "HOME_DIR") "/.claude.json")))` + "\n")
-	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.claude")))` + "\n")
 	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.config")))` + "\n")
 	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.local")))` + "\n")
 	b.WriteString(`(allow file-read* (subpath (string-append (param "HOME_DIR") "/.npm")))` + "\n")
@@ -146,11 +155,26 @@ func buildProfile(templateFragments []string, extraWritePaths []string) string {
 	b.WriteString("\n;; working directory (write)\n")
 	b.WriteString(`(allow file-write* (subpath (param "WORKING_DIR")))` + "\n")
 
-	// Claude Code config — ~/.claude, ~/.claude.json and ~/.config (write)
-	b.WriteString("\n;; claude config (write)\n")
-	b.WriteString(`(allow file-write* (literal (string-append (param "HOME_DIR") "/.claude.json")))` + "\n")
-	b.WriteString(`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))` + "\n")
-	b.WriteString(`(allow file-write* (subpath (string-append (param "HOME_DIR") "/.config")))` + "\n")
+	// Harness-specific path grants (e.g. Claude Code config dirs)
+	if len(pathGrants) > 0 {
+		b.WriteString("\n;; harness path grants\n")
+		for _, g := range pathGrants {
+			path := g.Path
+			if strings.HasPrefix(path, "$HOME") {
+				path = `(string-append (param "HOME_DIR") "` + strings.TrimPrefix(path, "$HOME") + `")`
+			} else {
+				path = `"` + path + `"`
+			}
+			kind := "literal"
+			if g.Recursive {
+				kind = "subpath"
+			}
+			b.WriteString(`(allow file-read* (` + kind + " " + path + `))` + "\n")
+			if g.Write {
+				b.WriteString(`(allow file-write* (` + kind + " " + path + `))` + "\n")
+			}
+		}
+	}
 
 	// Extra write paths (e.g. shared git common dir for worktrees)
 	if len(extraWritePaths) > 0 {
@@ -180,7 +204,7 @@ func (pb *ProfileBuilder) BuildWithContent(cfg ProfileConfig, templateContents [
 		}
 		templateFragments = append(templateFragments, ";; inline template\n"+strings.TrimSpace(content))
 	}
-	return buildProfile(templateFragments, cfg.ExtraWritePaths), nil
+	return buildProfile(templateFragments, cfg.ExtraWritePaths, cfg.PathGrants), nil
 }
 
 // validateTemplateName ensures the template name is safe to embed in a profile comment.
@@ -194,4 +218,3 @@ func validateTemplateName(name string) error {
 	}
 	return nil
 }
-
