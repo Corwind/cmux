@@ -3,6 +3,7 @@ import { useCreateSession } from "../hooks/useCreateSession";
 import { useSessionsStore } from "../stores/sessions.store";
 import { FileBrowser } from "@/features/file-browser";
 import { TemplateSelector } from "@/features/templates";
+import { HarnessSelector } from "@/features/harnesses";
 import { useGitInfo } from "@/features/git";
 import type { WorktreeInput, CreateSessionInput } from "../types";
 import { WorktreeSection } from "./WorktreeSection";
@@ -12,6 +13,7 @@ export function CreateSessionDialog() {
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState("");
   const [templateId, setTemplateId] = useState("");
+  const [harnessType, setHarnessType] = useState("");
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [debouncedDir, setDebouncedDir] = useState("");
@@ -19,6 +21,7 @@ export function CreateSessionDialog() {
   const [effectiveWorkingDir, setEffectiveWorkingDir] = useState("");
 
   const handleTemplateChange = useCallback((id: string) => setTemplateId(id), []);
+  const handleHarnessChange = useCallback((type: string) => setHarnessType(type), []);
   const createSession = useCreateSession();
   const setActiveSession = useSessionsStore((s) => s.setActiveSession);
 
@@ -50,6 +53,7 @@ export function CreateSessionDialog() {
     const input: CreateSessionInput = { working_dir: workingDir };
     if (name.trim()) input.name = name.trim();
     if (templateId) input.template_id = templateId;
+    if (harnessType) input.harness_type = harnessType;
     if (skipPermissions) input.skip_permissions = true;
     if (worktreeInput) input.worktree = worktreeInput;
 
@@ -59,6 +63,7 @@ export function CreateSessionDialog() {
         setName("");
         setDirectory("");
         setTemplateId("");
+        setHarnessType("");
         setSkipPermissions(false);
         setWorktreeInput(undefined);
         setEffectiveWorkingDir("");
@@ -188,6 +193,7 @@ export function CreateSessionDialog() {
         )}
 
         <TemplateSelector value={templateId} onChange={handleTemplateChange} />
+        <HarnessSelector value={harnessType} onChange={handleHarnessChange} />
         <label
           className="flex items-center gap-2 text-xs"
           style={{ color: "var(--cmux-text-muted)" }}

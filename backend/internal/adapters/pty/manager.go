@@ -32,13 +32,13 @@ func WithCommand(command string) Option {
 	}
 }
 
-// WithHarness sets the Harness used to source binary name, spawn env
-// overrides, open-URL-wrapper requirement, and sandbox path grants. If unset
-// (nil), Manager falls back to the pre-harness hardcoded Claude-specific
-// defaults.
-func WithHarness(h harness.Harness) Option {
+// WithHarnessRegistry sets the Registry used to resolve, per spawn call, the
+// Harness that sources binary name, spawn env overrides, open-URL-wrapper
+// requirement, and sandbox path grants. If unset (nil), Manager falls back to
+// the pre-harness hardcoded Claude-specific defaults.
+func WithHarnessRegistry(r *harness.Registry) Option {
 	return func(m *Manager) {
-		m.harness = h
+		m.harnessRegistry = r
 	}
 }
 
@@ -83,7 +83,22 @@ type Manager struct {
 	sandboxBuilder   *sandbox.ProfileBuilder
 	sandboxTemplates []string
 	sandboxContent   []string
-	harness          harness.Harness
+	harnessRegistry  *harness.Registry
+}
+
+// resolveHarness returns the Harness registered under harnessType, falling
+// back to the registry's Default() when harnessType is empty, the registry is
+// nil, or the type isn't registered.
+func (m *Manager) resolveHarness(harnessType string) harness.Harness {
+	if m.harnessRegistry == nil {
+		return nil
+	}
+	if harnessType != "" {
+		if h, ok := m.harnessRegistry.Get(harness.Type(harnessType)); ok {
+			return h
+		}
+	}
+	return m.harnessRegistry.Default()
 }
 
 func NewManager(opts ...Option) *Manager {
@@ -97,7 +112,9 @@ func NewManager(opts ...Option) *Manager {
 	return m
 }
 
-func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*ports.PTYHandle, error) {
+func (m *Manager) Spawn(_ context.Context, workingDir string, harnessType string, args ...string) (*ports.PTYHandle, error) {
+	h := m.resolveHarness(harnessType)
+
 	spawnArgs := args
 	if m.fixedArgs != nil {
 		spawnArgs = m.fixedArgs
@@ -112,13 +129,13 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 
 	var cmd *exec.Cmd
 	if m.sandboxBuilder != nil {
-		sandboxCmd, err := m.buildSandboxCommand(resolvedDir, spawnArgs)
+		sandboxCmd, err := m.buildSandboxCommand(h, resolvedDir, spawnArgs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build sandbox command: %w", err)
 		}
 		cmd = sandboxCmd
 	} else {
-		cmd = exec.Command(m.binaryName(), spawnArgs...)
+		cmd = exec.Command(m.binaryName(h), spawnArgs...)
 	}
 
 	cmd.Dir = resolvedDir
@@ -142,8 +159,8 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 
 	// Harness-specific env overrides, applied on top of the generic
 	// terminal-spoofing block above.
-	if m.harness != nil {
-		stripKeys, setVars := m.harness.EnvOverrides()
+	if h != nil {
+		stripKeys, setVars := h.EnvOverrides()
 		for _, key := range stripKeys {
 			env = filterEnv(env, key)
 		}
@@ -157,7 +174,7 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 	// in the host browser via POST /api/open (Apple Events are blocked inside
 	// sandbox-exec, so the real /usr/bin/open can't communicate with the browser).
 	var wrapperDir string
-	if m.harness == nil || m.harness.NeedsOpenURLWrapper() {
+	if h == nil || h.NeedsOpenURLWrapper() {
 		var wrapErr error
 		wrapperDir, wrapErr = installOpenWrapper(env)
 		if wrapErr != nil {
@@ -196,14 +213,14 @@ func (m *Manager) Spawn(_ context.Context, workingDir string, args ...string) (*
 }
 
 // binaryName resolves the executable to spawn: an explicit WithCommand
-// override always wins, then a wired Harness's BinaryName, then the
+// override always wins, then the resolved Harness's BinaryName, then the
 // hardcoded "claude" default.
-func (m *Manager) binaryName() string {
+func (m *Manager) binaryName(h harness.Harness) string {
 	if m.commandExplicit {
 		return m.command
 	}
-	if m.harness != nil {
-		return m.harness.BinaryName()
+	if h != nil {
+		return h.BinaryName()
 	}
 	return m.command
 }
@@ -338,7 +355,7 @@ func (m *Manager) SetSandboxContent(contents []string) {
 	m.sandboxContent = contents
 }
 
-func (m *Manager) buildSandboxCommand(workingDir string, originalArgs []string) (*exec.Cmd, error) {
+func (m *Manager) buildSandboxCommand(h harness.Harness, workingDir string, originalArgs []string) (*exec.Cmd, error) {
 	cfg := sandbox.ProfileConfig{
 		WorkingDir:    workingDir,
 		TemplateNames: m.sandboxTemplates,
@@ -355,15 +372,15 @@ func (m *Manager) buildSandboxCommand(workingDir string, originalArgs []string) 
 	}
 
 	// Harness-specific config paths that need write access inside the sandbox.
-	if m.harness != nil && m.harness.HasSandboxPathGrants() {
-		for _, grant := range m.harness.SandboxPathGrants() {
+	if h != nil && h.HasSandboxPathGrants() {
+		for _, grant := range h.SandboxPathGrants() {
 			cfg.PathGrants = append(cfg.PathGrants, sandbox.PathGrant{
 				Path:      grant.Path,
 				Recursive: grant.Recursive,
 				Write:     grant.Write,
 			})
 		}
-	} else if m.harness == nil {
+	} else if h == nil {
 		// Claude Code config paths that need write access inside the sandbox.
 		cfg.PathGrants = []sandbox.PathGrant{
 			{Path: "$HOME/.claude.json", Recursive: false, Write: true},
@@ -397,7 +414,7 @@ func (m *Manager) buildSandboxCommand(workingDir string, originalArgs []string) 
 	for key, value := range params {
 		sandboxArgs = append(sandboxArgs, "-D", key+"="+value)
 	}
-	sandboxArgs = append(sandboxArgs, m.binaryName())
+	sandboxArgs = append(sandboxArgs, m.binaryName(h))
 	sandboxArgs = append(sandboxArgs, originalArgs...)
 
 	return exec.Command("sandbox-exec", sandboxArgs...), nil

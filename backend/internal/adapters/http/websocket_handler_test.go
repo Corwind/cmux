@@ -12,6 +12,8 @@ import (
 	"github.com/Corwind/cmux/backend/internal/adapters/pty"
 	"github.com/Corwind/cmux/backend/internal/adapters/sqlite"
 	"github.com/Corwind/cmux/backend/internal/app"
+	"github.com/Corwind/cmux/backend/internal/domain"
+	"github.com/Corwind/cmux/backend/internal/harness"
 	"github.com/coder/websocket"
 )
 
@@ -27,7 +29,10 @@ func setupTestServer(t *testing.T) (*httptest.Server, *app.SessionService) {
 	pm := pty.NewManager(pty.WithCommand("sleep"), pty.WithFixedArgs("60"))
 	service := app.NewSessionService(repo, pm, nil)
 
-	router := NewTestRouter(service, nil, nil, nil)
+	registry := harness.NewRegistry()
+	registry.Register(harness.NewClaudeHarness(domain.ClaudeConfig{}), "Claude Code")
+
+	router := NewTestRouter(service, nil, nil, nil, registry)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 

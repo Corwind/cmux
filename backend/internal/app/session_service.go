@@ -43,21 +43,22 @@ type CreateSessionInput struct {
 	WorkingDir      string
 	TemplateID      string
 	SkipPermissions bool
+	HarnessType     string
 	Worktree        *WorktreeSpec
 }
 
 type SessionService struct {
-	repo           ports.SessionRepository
-	processManager ports.ProcessManager
-	templateRepo   ports.TemplateRepository
-	gitService     ports.GitService
-	worktreeRepo   ports.WorktreeRepository
-	worktreesDir   string
-	harness        harness.Harness
-	mu             sync.RWMutex
-	provisionCtxs  sync.Map // key: sessionID string, value: context.CancelFunc
-	deletionCtxs   sync.Map // key: worktreeID string, value: context.CancelFunc
-	broadcaster    SessionEventBroadcaster
+	repo            ports.SessionRepository
+	processManager  ports.ProcessManager
+	templateRepo    ports.TemplateRepository
+	gitService      ports.GitService
+	worktreeRepo    ports.WorktreeRepository
+	worktreesDir    string
+	harnessRegistry *harness.Registry
+	mu              sync.RWMutex
+	provisionCtxs   sync.Map // key: sessionID string, value: context.CancelFunc
+	deletionCtxs    sync.Map // key: worktreeID string, value: context.CancelFunc
+	broadcaster     SessionEventBroadcaster
 }
 
 func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, templateRepo ports.TemplateRepository, opts ...SessionServiceOption) *SessionService {
@@ -69,12 +70,28 @@ func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, te
 	for _, opt := range opts {
 		opt(s)
 	}
-	// Callers (mainly tests) that don't inject a harness via WithHarness get the
-	// same Claude behavior as before this package existed, with no model set.
-	if s.harness == nil {
-		s.harness = harness.NewClaudeHarness(domain.ClaudeConfig{})
+	// Callers (mainly tests) that don't inject a registry via WithHarnessRegistry
+	// get the same Claude behavior as before this package existed, with no model
+	// set.
+	if s.harnessRegistry == nil {
+		s.harnessRegistry = harness.NewRegistry()
+		s.harnessRegistry.Register(harness.NewClaudeHarness(domain.ClaudeConfig{}), "Claude Code")
 	}
 	return s
+}
+
+// resolveHarness returns the harness registered for the given type name,
+// falling back to the registry's Default() when the type is empty or has no
+// registered implementation. A non-empty, unregistered type is logged as a
+// warning before falling back.
+func (s *SessionService) resolveHarness(harnessType string) harness.Harness {
+	if harnessType != "" {
+		if h, ok := s.harnessRegistry.Get(harness.Type(harnessType)); ok {
+			return h
+		}
+		slog.Warn("requested harness type not registered, falling back to default", "harness_type", harnessType)
+	}
+	return s.harnessRegistry.Default()
 }
 
 type SessionServiceOption func(*SessionService)
@@ -100,11 +117,11 @@ func WithBroadcaster(b SessionEventBroadcaster) SessionServiceOption {
 	}
 }
 
-// WithHarness injects the coding-agent harness strategy used to build spawn
-// arguments and mint the harness type recorded on new sessions.
-func WithHarness(h harness.Harness) SessionServiceOption {
+// WithHarnessRegistry injects the set of coding-agent harness strategies
+// available for session creation/resumption, keyed by harness type.
+func WithHarnessRegistry(r *harness.Registry) SessionServiceOption {
 	return func(s *SessionService) {
-		s.harness = h
+		s.harnessRegistry = r
 	}
 }
 
@@ -115,8 +132,10 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		return s.createSessionAsync(ctx, input)
 	}
 
+	h := s.resolveHarness(input.HarnessType)
+
 	// --- Synchronous path (no worktree) ---
-	session, err := domain.NewSession(input.Name, workingDir, string(s.harness.Type()))
+	session, err := domain.NewSession(input.Name, workingDir, string(h.Type()))
 	if err != nil {
 		slog.Error("invalid session parameters", "name", input.Name, "working_dir", workingDir, "err", err)
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
@@ -125,12 +144,12 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	// Resolve sandbox template content
 	s.applySandboxContent(ctx, input.TemplateID)
 
-	args := s.harness.BuildSpawnArgs(harness.SpawnIntent{
+	args := h.BuildSpawnArgs(harness.SpawnIntent{
 		SessionID:       session.HarnessSessionID,
 		SkipPermissions: input.SkipPermissions,
 	})
 	slog.Info("spawning session process", "session_id", session.ID, "working_dir", workingDir)
-	handle, err := s.processManager.Spawn(ctx, workingDir, args...)
+	handle, err := s.processManager.Spawn(ctx, workingDir, string(h.Type()), args...)
 	if err != nil {
 		slog.Error("failed to spawn session process", "session_id", session.ID, "working_dir", workingDir, "err", err)
 		return domain.Session{}, fmt.Errorf("failed to spawn process: %w", err)
@@ -181,7 +200,8 @@ func (s *SessionService) createSessionAsync(ctx context.Context, input CreateSes
 	}
 
 	// Create session with StatusProvisioning
-	session, err := domain.NewSession(input.Name, wtPath, string(s.harness.Type()))
+	h := s.resolveHarness(input.HarnessType)
+	session, err := domain.NewSession(input.Name, wtPath, string(h.Type()))
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
 	}
@@ -204,7 +224,7 @@ func (s *SessionService) createSessionAsync(ctx context.Context, input CreateSes
 
 	slog.Info("session queued for provisioning", "session_id", session.ID, "worktree_path", wtPath, "branch", spec.Branch)
 
-	go s.provisionWorktree(session, input, *spec, info.RepoRoot, wtPath, provCtx, cancel)
+	go s.provisionWorktree(session, input, *spec, info.RepoRoot, wtPath, provCtx, cancel, h)
 
 	return session, nil
 }
@@ -214,7 +234,7 @@ func (s *SessionService) createSessionAsync(ctx context.Context, input CreateSes
 // StatusRunning or StatusFailed.
 // provCtx and cancel are created by createSessionAsync before the goroutine is
 // launched so that a concurrent DeleteSession never misses the cancel function.
-func (s *SessionService) provisionWorktree(session domain.Session, input CreateSessionInput, spec WorktreeSpec, repoRoot, wtPath string, provCtx context.Context, cancel context.CancelFunc) {
+func (s *SessionService) provisionWorktree(session domain.Session, input CreateSessionInput, spec WorktreeSpec, repoRoot, wtPath string, provCtx context.Context, cancel context.CancelFunc, h harness.Harness) {
 	defer func() {
 		cancel()
 		s.provisionCtxs.Delete(session.ID)
@@ -238,12 +258,12 @@ func (s *SessionService) provisionWorktree(session domain.Session, input CreateS
 	// Resolve sandbox template
 	s.applySandboxContent(provCtx, input.TemplateID)
 
-	args := s.harness.BuildSpawnArgs(harness.SpawnIntent{
+	args := h.BuildSpawnArgs(harness.SpawnIntent{
 		SessionID:       session.HarnessSessionID,
 		SkipPermissions: input.SkipPermissions,
 	})
 
-	handle, err := s.processManager.Spawn(context.Background(), workingDir, args...)
+	handle, err := s.processManager.Spawn(context.Background(), workingDir, string(h.Type()), args...)
 	if err != nil {
 		slog.Error("failed to spawn process for provisioning session", "session_id", session.ID, "err", err)
 		// Best-effort cleanup of the orphaned worktree
@@ -345,12 +365,13 @@ func (s *SessionService) ResumeSession(ctx context.Context, id string) (domain.S
 	// Reapply the sandbox template that was used when the session was created
 	s.applySandboxContent(ctx, session.TemplateID)
 
-	args := s.harness.BuildSpawnArgs(harness.SpawnIntent{
+	h := s.resolveHarness(session.HarnessType)
+	args := h.BuildSpawnArgs(harness.SpawnIntent{
 		SessionID:       session.HarnessSessionID,
-		Resume:          s.harness.HasResumeSupport(),
+		Resume:          h.HasResumeSupport(),
 		SkipPermissions: session.SkipPermissions,
 	})
-	handle, err := s.processManager.Spawn(ctx, session.WorkingDir, args...)
+	handle, err := s.processManager.Spawn(ctx, session.WorkingDir, string(h.Type()), args...)
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("failed to resume process: %w", err)
 	}

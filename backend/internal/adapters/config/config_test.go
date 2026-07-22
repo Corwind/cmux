@@ -327,3 +327,79 @@ model = "claude-sonnet-4-6"
 		t.Errorf("expected TOML claude model 'claude-sonnet-4-6' to override env var, got %q", cfg.Claude.Model)
 	}
 }
+
+func TestLoadHarnessesDefaults(t *testing.T) {
+	t.Setenv("CMUX_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.toml"))
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if len(cfg.Harnesses) != 1 || cfg.Harnesses[0] != "claude" {
+		t.Errorf("expected default harnesses ['claude'], got %v", cfg.Harnesses)
+	}
+	if cfg.Claude.SectionName != "Claude Code" {
+		t.Errorf("expected default claude section_name 'Claude Code', got %q", cfg.Claude.SectionName)
+	}
+}
+
+func TestLoadHarnessesFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+harnesses = ["claude", "codex"]
+
+[claude]
+section_name = "Claude Code"
+
+[codex]
+section_name = "Codex"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if len(cfg.Harnesses) != 2 || cfg.Harnesses[0] != "claude" || cfg.Harnesses[1] != "codex" {
+		t.Errorf("expected harnesses ['claude', 'codex'], got %v", cfg.Harnesses)
+	}
+	if cfg.Claude.SectionName != "Claude Code" {
+		t.Errorf("expected claude section_name 'Claude Code', got %q", cfg.Claude.SectionName)
+	}
+}
+
+func TestLoadClaudeSectionNameOverridesDefault(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[claude]
+section_name = "My Claude"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Claude.SectionName != "My Claude" {
+		t.Errorf("expected claude section_name 'My Claude', got %q", cfg.Claude.SectionName)
+	}
+	// harnesses should still default since not set in TOML
+	if len(cfg.Harnesses) != 1 || cfg.Harnesses[0] != "claude" {
+		t.Errorf("expected default harnesses ['claude'], got %v", cfg.Harnesses)
+	}
+}

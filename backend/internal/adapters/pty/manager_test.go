@@ -20,7 +20,7 @@ func TestSpawn(t *testing.T) {
 	m := newTestManager()
 	ctx := context.Background()
 
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestGetHandle(t *testing.T) {
 	m := newTestManager()
 	ctx := context.Background()
 
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestIsAlive(t *testing.T) {
 	m := newTestManager()
 	ctx := context.Background()
 
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestReadWrite(t *testing.T) {
 	m := NewManager(WithCommand("cat"))
 	ctx := context.Background()
 
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestResize(t *testing.T) {
 	m := newTestManager()
 	ctx := context.Background()
 
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestKill(t *testing.T) {
 	m := newTestManager()
 	ctx := context.Background()
 
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestWithCommandOptionChangesSpawnedProcess(t *testing.T) {
 	m := NewManager(WithCommand("sh"), WithFixedArgs("-c", "echo hello_from_custom_cmd"))
 	ctx := context.Background()
 
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn with custom command failed: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestWithEnvSpawnUsesBaseEnv(t *testing.T) {
 	m := NewManager(WithCommand("sh"), WithFixedArgs("-c", "env"), WithEnv(baseEnv))
 	ctx := context.Background()
 
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestWithEnvFiltersCLAUDECODE(t *testing.T) {
 	m := NewManager(WithCommand("sh"), WithFixedArgs("-c", "env"), WithEnv(baseEnv))
 	ctx := context.Background()
 
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -418,4 +418,3 @@ func TestResolveGitCommonDir_Worktree(t *testing.T) {
 		t.Errorf("expected objects dir in common dir %q: %v", commonDir, err)
 	}
 }
-

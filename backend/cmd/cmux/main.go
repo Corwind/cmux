@@ -48,10 +48,24 @@ func main() {
 	envCache := configadapter.NewEnvCache(func() []string {
 		return configadapter.ResolveShellEnv(cfg)
 	}, 5*time.Minute)
-	claudeHarness := harness.NewClaudeHarness(cfg.Claude)
-	registry := harness.NewRegistry(claudeHarness)
+	implemented := map[harness.Type]struct {
+		harness     harness.Harness
+		sectionName string
+	}{
+		harness.ClaudeType: {harness.NewClaudeHarness(cfg.Claude), cfg.Claude.SectionName},
+	}
 
-	managerOpts := []pty.Option{pty.WithSandbox(builder), pty.WithEnvResolver(envCache.Get), pty.WithHarness(registry.Default())}
+	registry := harness.NewRegistry()
+	for _, name := range cfg.Harnesses {
+		impl, ok := implemented[harness.Type(name)]
+		if !ok {
+			slog.Warn("configured harness has no implementation", "type", name)
+			continue
+		}
+		registry.Register(impl.harness, impl.sectionName)
+	}
+
+	managerOpts := []pty.Option{pty.WithSandbox(builder), pty.WithEnvResolver(envCache.Get), pty.WithHarnessRegistry(registry)}
 
 	if len(cfg.Sandbox.Templates) > 0 {
 		managerOpts = append(managerOpts, pty.WithSandboxTemplates(cfg.Sandbox.Templates...))
@@ -66,17 +80,17 @@ func main() {
 	// Break circular dependency: wsHandler needs the hub created first, then the
 	// hub is wired into sessionService as a broadcaster, and finally sessionService
 	// is injected back into wsHandler via SetService.
-	wsHandler := httpadapter.NewWebSocketHandler(nil, httpadapter.WithOriginPatterns([]string{"*"}), httpadapter.WithHarness(registry.Default()))
+	wsHandler := httpadapter.NewWebSocketHandler(nil, httpadapter.WithOriginPatterns([]string{"*"}), httpadapter.WithHarnessRegistry(registry))
 	sessionServiceOpts := []appservice.SessionServiceOption{
 		appservice.WithGitService(gitService, cfg.Git.WorktreesDir),
 		appservice.WithWorktreeRepository(worktreeRepo),
 		appservice.WithBroadcaster(wsHandler.Hub()),
-		appservice.WithHarness(registry.Default()),
+		appservice.WithHarnessRegistry(registry),
 	}
 	sessionService := appservice.NewSessionService(repo, processManager, templateRepo, sessionServiceOpts...)
 	wsHandler.SetService(sessionService)
 
-	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, gitService, cfg.Server.Port, wsHandler)
+	router := httpadapter.NewRouter(sessionService, templateService, fileBrowser, gitService, cfg.Server.Port, wsHandler, registry)
 
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	server := &http.Server{

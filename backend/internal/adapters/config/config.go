@@ -11,16 +11,18 @@ import (
 )
 
 type tomlConfig struct {
-	Server  tomlServer        `toml:"server"`
-	Sandbox tomlSandbox       `toml:"sandbox"`
-	Shell   tomlShell         `toml:"shell"`
-	Git     tomlGit           `toml:"git"`
-	Claude  tomlClaude        `toml:"claude"`
-	Env     map[string]string `toml:"env"`
+	Server    tomlServer        `toml:"server"`
+	Sandbox   tomlSandbox       `toml:"sandbox"`
+	Shell     tomlShell         `toml:"shell"`
+	Git       tomlGit           `toml:"git"`
+	Claude    tomlClaude        `toml:"claude"`
+	Env       map[string]string `toml:"env"`
+	Harnesses []string          `toml:"harnesses"`
 }
 
 type tomlClaude struct {
-	Model string `toml:"model"`
+	Model       string `toml:"model"`
+	SectionName string `toml:"section_name"`
 }
 
 type tomlGit struct {
@@ -83,6 +85,10 @@ func defaults() domain.Config {
 		Git: domain.GitConfig{
 			WorktreesDir: "~/.cmux/worktrees",
 		},
+		Claude: domain.ClaudeConfig{
+			SectionName: "Claude Code",
+		},
+		Harnesses: []string{"claude"},
 	}
 }
 
@@ -145,6 +151,12 @@ func loadFile(path string, cfg *domain.Config) error {
 	}
 	if tc.Claude.Model != "" {
 		cfg.Claude.Model = tc.Claude.Model
+	}
+	if tc.Claude.SectionName != "" {
+		cfg.Claude.SectionName = tc.Claude.SectionName
+	}
+	if len(tc.Harnesses) > 0 {
+		cfg.Harnesses = tc.Harnesses
 	}
 
 	return nil
