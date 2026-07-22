@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN harness_type TEXT NOT NULL DEFAULT '';

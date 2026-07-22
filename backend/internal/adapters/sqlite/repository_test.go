@@ -2,12 +2,14 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
+	"github.com/golang-migrate/migrate/v4"
 )
 
 func setupTestRepo(t *testing.T) *Repository {
@@ -473,18 +475,30 @@ func TestRepository_HarnessTypeRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRepository_HarnessType_BackfillsPreMigrationRows exercises the
+// backfill migration (0014) directly: it steps a raw DB up to just before
+// the backfill (version 13, harness_type column exists but nothing has
+// backfilled it yet), inserts a row with harness_type left empty exactly as
+// a pre-migration row would have been, then runs the remaining migration and
+// checks the row gets backfilled without touching unrelated columns.
 func TestRepository_HarnessType_BackfillsPreMigrationRows(t *testing.T) {
-	// Simulate an "old" pre-migration row by inserting directly via raw SQL,
-	// bypassing Create() and explicitly setting harness_type to the empty
-	// string default that existed before this column was backfilled.
 	dbPath := filepath.Join(t.TempDir(), "cmux.db")
-	repo, err := NewRepository(dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		t.Fatalf("NewRepository failed: %v", err)
+		t.Fatalf("failed to open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	m, err := newMigrator(db)
+	if err != nil {
+		t.Fatalf("newMigrator failed: %v", err)
+	}
+	if err := m.Migrate(13); err != nil {
+		t.Fatalf("failed to migrate to version 13: %v", err)
 	}
 
 	now := time.Now()
-	if _, err := repo.DB().Exec(
+	if _, err := db.Exec(
 		"INSERT INTO sessions (id, name, working_dir, status, pid, claude_session_id, harness_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)",
 		"pre-migration-sess", "old-sess", "/tmp", "stopped", 0, "old-claude-session-id", now, now,
 	); err != nil {
@@ -492,26 +506,19 @@ func TestRepository_HarnessType_BackfillsPreMigrationRows(t *testing.T) {
 	}
 
 	var harnessType string
-	if err := repo.DB().QueryRow("SELECT harness_type FROM sessions WHERE id = ?", "pre-migration-sess").Scan(&harnessType); err != nil {
-		t.Fatalf("failed to query harness_type before reopen: %v", err)
+	if err := db.QueryRow("SELECT harness_type FROM sessions WHERE id = ?", "pre-migration-sess").Scan(&harnessType); err != nil {
+		t.Fatalf("failed to query harness_type before backfill: %v", err)
 	}
 	if harnessType != "" {
 		t.Fatalf("expected empty harness_type before backfill, got %q", harnessType)
 	}
-	if err := repo.Close(); err != nil {
-		t.Fatalf("failed to close repository: %v", err)
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		t.Fatalf("failed to run remaining migrations: %v", err)
 	}
 
-	// Reopening the repository re-runs NewRepository's migrations, including
-	// the backfill UPDATE, which should populate harness_type for the
-	// pre-existing row without touching any other column.
-	repo2, err := NewRepository(dbPath)
-	if err != nil {
-		t.Fatalf("second NewRepository failed: %v", err)
-	}
-	defer func() { _ = repo2.Close() }()
-
-	got, err := repo2.Get(context.Background(), "pre-migration-sess")
+	repo := &Repository{db: db}
+	got, err := repo.Get(context.Background(), "pre-migration-sess")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -523,6 +530,106 @@ func TestRepository_HarnessType_BackfillsPreMigrationRows(t *testing.T) {
 	}
 	if got.Name != "old-sess" {
 		t.Errorf("expected untouched Name %q, got %q", "old-sess", got.Name)
+	}
+}
+
+// TestRepository_AdoptsPreExistingDatabaseWithoutSchemaMigrations simulates a
+// real on-disk DB created by the old ad-hoc migrator, before golang-migrate
+// existed: full final schema present, but no schema_migrations table. It
+// verifies NewRepository force-baselines such a DB to the latest version
+// instead of erroring on "table already exists", and that existing data
+// survives untouched.
+func TestRepository_AdoptsPreExistingDatabaseWithoutSchemaMigrations(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cmux.db")
+
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open legacy db: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+CREATE TABLE sessions (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	working_dir TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'stopped',
+	pid INTEGER DEFAULT 0,
+	claude_session_id TEXT NOT NULL DEFAULT '',
+	template_id TEXT NOT NULL DEFAULT '',
+	skip_permissions INTEGER NOT NULL DEFAULT 0,
+	repo_root TEXT NOT NULL DEFAULT '',
+	git_branch TEXT NOT NULL DEFAULT '',
+	worktree_managed INTEGER NOT NULL DEFAULT 0,
+	error TEXT NOT NULL DEFAULT '',
+	harness_type TEXT NOT NULL DEFAULT '',
+	created_at DATETIME NOT NULL,
+	updated_at DATETIME NOT NULL
+);
+CREATE TABLE worktrees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL UNIQUE,
+	branch TEXT NOT NULL DEFAULT '',
+	repo_root TEXT NOT NULL DEFAULT '',
+	session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+	status TEXT NOT NULL DEFAULT 'ready',
+	created_at DATETIME NOT NULL
+);
+CREATE TABLE worktree_sessions (
+	worktree_id TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+	session_id  TEXT NOT NULL REFERENCES sessions(id)  ON DELETE CASCADE,
+	PRIMARY KEY (worktree_id, session_id)
+);
+CREATE TABLE sandbox_templates (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	content TEXT NOT NULL,
+	is_default INTEGER NOT NULL DEFAULT 0,
+	created_at DATETIME NOT NULL,
+	updated_at DATETIME NOT NULL
+);
+`); err != nil {
+		t.Fatalf("failed to create legacy schema: %v", err)
+	}
+	now := time.Now()
+	if _, err := legacyDB.Exec(
+		"INSERT INTO sessions (id, name, working_dir, status, pid, claude_session_id, harness_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"legacy-sess", "legacy-name", "/tmp", "stopped", 0, "legacy-harness-session-id", "claude", now, now,
+	); err != nil {
+		t.Fatalf("failed to insert legacy row: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("failed to close legacy db: %v", err)
+	}
+
+	// Now go through the normal entry point; it should detect the missing
+	// schema_migrations table and force-baseline to the latest version
+	// instead of trying (and failing) to recreate existing tables.
+	repo, err := NewRepository(dbPath)
+	if err != nil {
+		t.Fatalf("NewRepository failed: %v", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	var version int
+	var dirty bool
+	if err := repo.DB().QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
+		t.Fatalf("failed to read schema_migrations: %v", err)
+	}
+	if version != latestMigrationVersion {
+		t.Errorf("expected schema_migrations version %d, got %d", latestMigrationVersion, version)
+	}
+	if dirty {
+		t.Error("expected schema_migrations not dirty after adoption")
+	}
+
+	got, err := repo.Get(context.Background(), "legacy-sess")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.HarnessSessionID != "legacy-harness-session-id" {
+		t.Errorf("expected HarnessSessionID %q, got %q", "legacy-harness-session-id", got.HarnessSessionID)
+	}
+	if got.Name != "legacy-name" {
+		t.Errorf("expected untouched Name %q, got %q", "legacy-name", got.Name)
 	}
 }
 

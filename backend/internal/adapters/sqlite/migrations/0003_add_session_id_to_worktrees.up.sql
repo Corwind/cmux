@@ -1,0 +1,1 @@
+ALTER TABLE worktrees ADD COLUMN session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL;

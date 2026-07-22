@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN worktree_managed INTEGER NOT NULL DEFAULT 0;

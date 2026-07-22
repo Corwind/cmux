@@ -1,73 +1,19 @@
 package sqlite
 
-const createSessionsTable = `
-CREATE TABLE IF NOT EXISTS sessions (
-	id TEXT PRIMARY KEY,
-	name TEXT NOT NULL,
-	working_dir TEXT NOT NULL,
-	status TEXT NOT NULL DEFAULT 'stopped',
-	pid INTEGER DEFAULT 0,
-	claude_session_id TEXT NOT NULL DEFAULT '',
-	created_at DATETIME NOT NULL,
-	updated_at DATETIME NOT NULL
-);
-`
+import "embed"
 
-const addTemplateIDToSessions = `
-ALTER TABLE sessions ADD COLUMN template_id TEXT NOT NULL DEFAULT '';
-`
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
 
-const addSkipPermissionsToSessions = `
-ALTER TABLE sessions ADD COLUMN skip_permissions INTEGER NOT NULL DEFAULT 0;
-`
+// latestMigrationVersion must match the highest NNNN prefix under
+// migrations/.
+const latestMigrationVersion = 15
 
-const addRepoRootToSessions = `
-ALTER TABLE sessions ADD COLUMN repo_root TEXT NOT NULL DEFAULT '';
-`
-
-const addGitBranchToSessions = `
-ALTER TABLE sessions ADD COLUMN git_branch TEXT NOT NULL DEFAULT '';
-`
-
-const addWorktreeManagedToSessions = `
-ALTER TABLE sessions ADD COLUMN worktree_managed INTEGER NOT NULL DEFAULT 0;
-`
-
-const addErrorToSessions = "ALTER TABLE sessions ADD COLUMN error TEXT NOT NULL DEFAULT ''"
-
-const addHarnessTypeToSessions = "ALTER TABLE sessions ADD COLUMN harness_type TEXT NOT NULL DEFAULT ''"
-
-const backfillHarnessTypeOnSessions = "UPDATE sessions SET harness_type = 'claude' WHERE harness_type = ''"
-
-const createWorktreesTable = `
-CREATE TABLE IF NOT EXISTS worktrees (
-	id TEXT PRIMARY KEY,
-	path TEXT NOT NULL UNIQUE,
-	branch TEXT NOT NULL DEFAULT '',
-	repo_root TEXT NOT NULL DEFAULT '',
-	created_at DATETIME NOT NULL
-);
-`
-
-const createWorktreeSessionsTable = `
-CREATE TABLE IF NOT EXISTS worktree_sessions (
-	worktree_id TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
-	session_id  TEXT NOT NULL REFERENCES sessions(id)  ON DELETE CASCADE,
-	PRIMARY KEY (worktree_id, session_id)
-);
-`
-
-const addSessionIDToWorktrees = "ALTER TABLE worktrees ADD COLUMN session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL;"
-
-const addStatusToWorktrees = "ALTER TABLE worktrees ADD COLUMN status TEXT NOT NULL DEFAULT 'ready';"
-
-const createTemplatesTable = `
-CREATE TABLE IF NOT EXISTS sandbox_templates (
-	id TEXT PRIMARY KEY,
-	name TEXT NOT NULL,
-	content TEXT NOT NULL,
-	is_default INTEGER NOT NULL DEFAULT 0,
-	created_at DATETIME NOT NULL,
-	updated_at DATETIME NOT NULL
-);
-`
+// legacyBaselineVersion is the version pre-existing databases (created by
+// the old ad-hoc, string-matching migrator before schema_migrations
+// tracking existed) are force-baselined to. It must stay pinned to the
+// last migration whose schema that old migrator actually produced —
+// NOT latestMigrationVersion — otherwise any later migration that does
+// something the ad-hoc migrator never did (e.g. renaming a column) gets
+// silently skipped for legacy databases instead of applied via m.Up().
+const legacyBaselineVersion = 14

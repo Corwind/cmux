@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
+	"github.com/golang-migrate/migrate/v4"
 	_ "modernc.org/sqlite"
 )
 
@@ -16,7 +17,11 @@ func setupTestTemplateRepo(t *testing.T) *TemplateRepository {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	if _, err := db.Exec(createTemplatesTable); err != nil {
+	m, err := newMigrator(db)
+	if err != nil {
+		t.Fatalf("failed to build migrator: %v", err)
+	}
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		t.Fatalf("failed to run migrations: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
