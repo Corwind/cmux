@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN template_id TEXT NOT NULL DEFAULT '';

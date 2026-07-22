@@ -47,25 +47,38 @@ type CreateSessionInput struct {
 	Worktree        *WorktreeSpec
 }
 
+// defaultDiscoverRetryAttempts and defaultDiscoverRetryInterval add up to a
+// 30s budget: observed against a real Codex CLI, it takes roughly 8-13s
+// after process start before it writes its rollout file (some startup
+// handshake happens first), so a couple of seconds isn't enough.
+const (
+	defaultDiscoverRetryAttempts = 60
+	defaultDiscoverRetryInterval = 500 * time.Millisecond
+)
+
 type SessionService struct {
-	repo            ports.SessionRepository
-	processManager  ports.ProcessManager
-	templateRepo    ports.TemplateRepository
-	gitService      ports.GitService
-	worktreeRepo    ports.WorktreeRepository
-	worktreesDir    string
-	harnessRegistry *harness.Registry
-	mu              sync.RWMutex
-	provisionCtxs   sync.Map // key: sessionID string, value: context.CancelFunc
-	deletionCtxs    sync.Map // key: worktreeID string, value: context.CancelFunc
-	broadcaster     SessionEventBroadcaster
+	repo                  ports.SessionRepository
+	processManager        ports.ProcessManager
+	templateRepo          ports.TemplateRepository
+	gitService            ports.GitService
+	worktreeRepo          ports.WorktreeRepository
+	worktreesDir          string
+	harnessRegistry       *harness.Registry
+	mu                    sync.RWMutex
+	provisionCtxs         sync.Map // key: sessionID string, value: context.CancelFunc
+	deletionCtxs          sync.Map // key: worktreeID string, value: context.CancelFunc
+	broadcaster           SessionEventBroadcaster
+	discoverRetryAttempts int
+	discoverRetryInterval time.Duration
 }
 
 func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, templateRepo ports.TemplateRepository, opts ...SessionServiceOption) *SessionService {
 	s := &SessionService{
-		repo:           repo,
-		processManager: pm,
-		templateRepo:   templateRepo,
+		repo:                  repo,
+		processManager:        pm,
+		templateRepo:          templateRepo,
+		discoverRetryAttempts: defaultDiscoverRetryAttempts,
+		discoverRetryInterval: defaultDiscoverRetryInterval,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -117,6 +130,17 @@ func WithBroadcaster(b SessionEventBroadcaster) SessionServiceOption {
 	}
 }
 
+// WithDiscoverRetryConfig overrides how long discoverAndPersistSessionID
+// polls for a harness-minted session ID after spawn. Tests use this to
+// shrink the real-world 30s budget so a fake harness that never succeeds
+// doesn't leave a slow-retrying goroutine running past the test.
+func WithDiscoverRetryConfig(attempts int, interval time.Duration) SessionServiceOption {
+	return func(s *SessionService) {
+		s.discoverRetryAttempts = attempts
+		s.discoverRetryInterval = interval
+	}
+}
+
 // WithHarnessRegistry injects the set of coding-agent harness strategies
 // available for session creation/resumption, keyed by harness type.
 func WithHarnessRegistry(r *harness.Registry) SessionServiceOption {
@@ -149,6 +173,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		SkipPermissions: input.SkipPermissions,
 	})
 	slog.Info("spawning session process", "session_id", session.ID, "working_dir", workingDir)
+	spawnStartedAt := time.Now()
 	handle, err := s.processManager.Spawn(ctx, workingDir, string(h.Type()), args...)
 	if err != nil {
 		slog.Error("failed to spawn session process", "session_id", session.ID, "working_dir", workingDir, "err", err)
@@ -169,6 +194,10 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	}
 
 	slog.Info("session created", "session_id", session.ID, "name", session.Name, "pid", session.PID, "working_dir", workingDir)
+
+	if h.HasExternalSessionIDMinting() {
+		go s.discoverAndPersistSessionID(h, session.ID, workingDir, spawnStartedAt)
+	}
 
 	go s.watchProcess(session.ID, handle)
 
@@ -263,6 +292,7 @@ func (s *SessionService) provisionWorktree(session domain.Session, input CreateS
 		SkipPermissions: input.SkipPermissions,
 	})
 
+	spawnStartedAt := time.Now()
 	handle, err := s.processManager.Spawn(context.Background(), workingDir, string(h.Type()), args...)
 	if err != nil {
 		slog.Error("failed to spawn process for provisioning session", "session_id", session.ID, "err", err)
@@ -295,9 +325,71 @@ func (s *SessionService) provisionWorktree(session domain.Session, input CreateS
 		s.broadcaster.BroadcastSessionStatus(session.ID, session.Name, string(domain.StatusRunning), "")
 	}
 
+	if h.HasExternalSessionIDMinting() {
+		go s.discoverAndPersistSessionID(h, session.ID, workingDir, spawnStartedAt)
+	}
+
 	go s.watchProcess(session.ID, handle)
 
 	slog.Info("session provisioned and running", "session_id", session.ID, "pid", session.PID, "working_dir", workingDir)
+}
+
+// discoverSessionIDWithRetry calls h.DiscoverSessionID repeatedly, tolerating
+// the delay between a harness process spawning and it writing out the
+// on-disk state DiscoverSessionID reads from. Callers must run this off any
+// blocking/request path (see discoverAndPersistSessionID) rather than await
+// it inline, since attempts/interval are sized for real-world harness
+// startup delays (see defaultDiscoverRetryAttempts/Interval), not an
+// instantaneous writer.
+//
+// workingDir is resolved through symlinks to match pty.Manager.Spawn, which
+// sets the harness process's actual cwd (and thus what a harness like Codex
+// records in its own on-disk session state) to the symlink-resolved path
+// (e.g. /var/folders -> /private/var/folders on macOS) rather than the raw
+// path cmux was given.
+func discoverSessionIDWithRetry(h harness.Harness, workingDir string, notBefore time.Time, attempts int, interval time.Duration) (string, error) {
+	resolvedDir, err := filepath.EvalSymlinks(workingDir)
+	if err != nil {
+		resolvedDir = workingDir
+	}
+
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		id, err := h.DiscoverSessionID(resolvedDir, notBefore)
+		if err == nil {
+			return id, nil
+		}
+		lastErr = err
+		time.Sleep(interval)
+	}
+	return "", lastErr
+}
+
+// discoverAndPersistSessionID runs in the background, detached from the
+// goroutine that spawned the session, so discoverSessionIDWithRetry's long
+// poll window never blocks session creation or delays the session appearing
+// as running. Once the harness-minted ID is found, it reloads the current
+// persisted session (rather than reusing a possibly-stale in-memory copy)
+// and overwrites just its HarnessSessionID, so a later Resume uses the ID
+// the harness will actually recognize instead of cmux's own placeholder.
+func (s *SessionService) discoverAndPersistSessionID(h harness.Harness, sessionID, workingDir string, spawnStartedAt time.Time) {
+	discovered, err := discoverSessionIDWithRetry(h, workingDir, spawnStartedAt, s.discoverRetryAttempts, s.discoverRetryInterval)
+	if err != nil {
+		slog.Warn("failed to discover harness-minted session id", "session_id", sessionID, "err", err)
+		return
+	}
+
+	session, err := s.repo.Get(context.Background(), sessionID)
+	if err != nil {
+		slog.Warn("failed to reload session before persisting discovered harness session id", "session_id", sessionID, "err", err)
+		return
+	}
+	session.HarnessSessionID = discovered
+	if err := s.repo.Update(context.Background(), session); err != nil {
+		slog.Warn("failed to persist discovered harness session id", "session_id", sessionID, "err", err)
+		return
+	}
+	slog.Info("persisted harness-minted session id", "session_id", sessionID, "harness_session_id", discovered)
 }
 
 // trackWorktreeSession creates or adopts a ManagedWorktree record for the given

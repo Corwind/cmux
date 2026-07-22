@@ -6,6 +6,7 @@ type Config struct {
 	Shell     ShellConfig
 	Git       GitConfig
 	Claude    ClaudeConfig
+	Codex     CodexConfig
 	Env       map[string]string
 	Harnesses []string
 }
@@ -32,4 +33,10 @@ type GitConfig struct {
 type ClaudeConfig struct {
 	Model       string
 	SectionName string
+}
+
+type CodexConfig struct {
+	Model       string
+	SectionName string
+	Home        string // overrides $HOME/.codex; empty means use the default
 }

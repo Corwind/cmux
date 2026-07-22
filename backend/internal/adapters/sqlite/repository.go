@@ -6,18 +6,46 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
+	"github.com/golang-migrate/migrate/v4"
+	migratesqlite "github.com/golang-migrate/migrate/v4/database/sqlite"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "modernc.org/sqlite"
 )
 
-func isDuplicateColumnError(err error) bool {
-	return strings.Contains(err.Error(), "duplicate column")
-}
-
 type Repository struct {
 	db *sql.DB
+}
+
+// newMigrator builds a golang-migrate instance over db using the embedded
+// SQL files in migrations/. It never closes db — callers own that lifecycle.
+func newMigrator(db *sql.DB) (*migrate.Migrate, error) {
+	source, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load embedded migrations: %w", err)
+	}
+
+	dbDriver, err := migratesqlite.WithInstance(db, &migratesqlite.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create migration driver: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", source, "sqlite", dbDriver)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create migrator: %w", err)
+	}
+	return m, nil
+}
+
+// tableExists reports whether a table with the given name exists in db.
+func tableExists(db *sql.DB, name string) (bool, error) {
+	var count int
+	err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", name).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func NewRepository(dbPath string) (*Repository, error) {
@@ -46,76 +74,38 @@ func NewRepository(dbPath string) (*Repository, error) {
 	// otherwise get its own independent database).
 	db.SetMaxOpenConns(1)
 
-	if _, err := db.Exec(createSessionsTable); err != nil {
+	// Detect pre-existing databases created by the old ad-hoc migrator,
+	// which never tracked a schema_migrations version, before constructing
+	// the migrator below — the sqlite migration driver creates
+	// schema_migrations as a side effect of WithInstance, so this check must
+	// run first or it would always see the table as already present.
+	hadSessionsTable, err := tableExists(db, "sessions")
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect existing schema: %w", err)
+	}
+	hadSchemaMigrationsTable, err := tableExists(db, "schema_migrations")
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect existing schema: %w", err)
+	}
+	isLegacyDatabase := hadSessionsTable && !hadSchemaMigrationsTable
+
+	m, err := newMigrator(db)
+	if err != nil {
+		return nil, err
+	}
+
+	// The DB already has the full schema (the old migrator ran
+	// unconditionally on every start), so mark it as fully migrated instead
+	// of replaying CREATE TABLE/ALTER TABLE statements against tables that
+	// already exist.
+	if isLegacyDatabase {
+		if err := m.Force(legacyBaselineVersion); err != nil {
+			return nil, fmt.Errorf("failed to adopt pre-existing database: %w", err)
+		}
+	}
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
-	}
-
-	if _, err := db.Exec(createWorktreesTable); err != nil {
-		return nil, fmt.Errorf("failed to create worktrees table: %w", err)
-	}
-
-	if _, err := db.Exec(addSessionIDToWorktrees); err != nil {
-		if !isDuplicateColumnError(err) {
-			return nil, fmt.Errorf("failed to add session_id column to worktrees: %w", err)
-		}
-	}
-
-	if _, err := db.Exec(addStatusToWorktrees); err != nil {
-		if !isDuplicateColumnError(err) {
-			return nil, fmt.Errorf("failed to add status column to worktrees: %w", err)
-		}
-	}
-
-	if _, err := db.Exec(createWorktreeSessionsTable); err != nil {
-		return nil, fmt.Errorf("failed to create worktree_sessions table: %w", err)
-	}
-
-	if _, err := db.Exec(createTemplatesTable); err != nil {
-		return nil, fmt.Errorf("failed to run template migrations: %w", err)
-	}
-
-	// Add template_id column if it doesn't exist (idempotent migration)
-	if _, err := db.Exec(addTemplateIDToSessions); err != nil {
-		// Ignore "duplicate column" errors — column already exists
-		if !isDuplicateColumnError(err) {
-			return nil, fmt.Errorf("failed to add template_id column: %w", err)
-		}
-	}
-
-	// Add skip_permissions column if it doesn't exist (idempotent migration)
-	if _, err := db.Exec(addSkipPermissionsToSessions); err != nil {
-		if !isDuplicateColumnError(err) {
-			return nil, fmt.Errorf("failed to add skip_permissions column: %w", err)
-		}
-	}
-
-	// Add worktree-related columns if they don't exist (idempotent migrations)
-	for _, migration := range []struct {
-		sql  string
-		name string
-	}{
-		{addRepoRootToSessions, "repo_root"},
-		{addGitBranchToSessions, "git_branch"},
-		{addWorktreeManagedToSessions, "worktree_managed"},
-		{addErrorToSessions, "error"},
-	} {
-		if _, err := db.Exec(migration.sql); err != nil {
-			if !isDuplicateColumnError(err) {
-				return nil, fmt.Errorf("failed to add %s column: %w", migration.name, err)
-			}
-		}
-	}
-
-	// Add harness_type column if it doesn't exist (idempotent migration)
-	if _, err := db.Exec(addHarnessTypeToSessions); err != nil {
-		if !isDuplicateColumnError(err) {
-			return nil, fmt.Errorf("failed to add harness_type column: %w", err)
-		}
-	}
-
-	// Backfill harness_type for rows created before the column existed
-	if _, err := db.Exec(backfillHarnessTypeOnSessions); err != nil {
-		return nil, fmt.Errorf("failed to backfill harness_type column: %w", err)
 	}
 
 	return &Repository{db: db}, nil
@@ -123,7 +113,7 @@ func NewRepository(dbPath string) (*Repository, error) {
 
 func (r *Repository) Create(ctx context.Context, session domain.Session) error {
 	_, err := r.db.ExecContext(ctx,
-		"INSERT INTO sessions (id, name, working_dir, status, pid, claude_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, harness_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO sessions (id, name, working_dir, status, pid, harness_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, harness_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		session.ID, session.Name, session.WorkingDir, session.Status, session.PID, session.HarnessSessionID, session.TemplateID, session.SkipPermissions, session.RepoRoot, session.GitBranch, session.WorktreeManaged, session.Error, session.HarnessType, session.CreatedAt, session.UpdatedAt,
 	)
 	return err
@@ -132,7 +122,7 @@ func (r *Repository) Create(ctx context.Context, session domain.Session) error {
 func (r *Repository) Get(ctx context.Context, id string) (domain.Session, error) {
 	var s domain.Session
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, name, working_dir, status, pid, claude_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, harness_type, created_at, updated_at FROM sessions WHERE id = ?", id,
+		"SELECT id, name, working_dir, status, pid, harness_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, harness_type, created_at, updated_at FROM sessions WHERE id = ?", id,
 	).Scan(&s.ID, &s.Name, &s.WorkingDir, &s.Status, &s.PID, &s.HarnessSessionID, &s.TemplateID, &s.SkipPermissions, &s.RepoRoot, &s.GitBranch, &s.WorktreeManaged, &s.Error, &s.HarnessType, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return domain.Session{}, fmt.Errorf("session not found: %s", id)
@@ -142,7 +132,7 @@ func (r *Repository) Get(ctx context.Context, id string) (domain.Session, error)
 
 func (r *Repository) List(ctx context.Context) ([]domain.Session, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, working_dir, status, pid, claude_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, harness_type, created_at, updated_at FROM sessions ORDER BY created_at DESC",
+		"SELECT id, name, working_dir, status, pid, harness_session_id, template_id, skip_permissions, repo_root, git_branch, worktree_managed, error, harness_type, created_at, updated_at FROM sessions ORDER BY created_at DESC",
 	)
 	if err != nil {
 		return nil, err
@@ -162,7 +152,7 @@ func (r *Repository) List(ctx context.Context) ([]domain.Session, error) {
 
 func (r *Repository) Update(ctx context.Context, session domain.Session) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE sessions SET name = ?, working_dir = ?, status = ?, pid = ?, claude_session_id = ?, template_id = ?, skip_permissions = ?, repo_root = ?, git_branch = ?, worktree_managed = ?, error = ?, harness_type = ?, updated_at = ? WHERE id = ?",
+		"UPDATE sessions SET name = ?, working_dir = ?, status = ?, pid = ?, harness_session_id = ?, template_id = ?, skip_permissions = ?, repo_root = ?, git_branch = ?, worktree_managed = ?, error = ?, harness_type = ?, updated_at = ? WHERE id = ?",
 		session.Name, session.WorkingDir, session.Status, session.PID, session.HarnessSessionID, session.TemplateID, session.SkipPermissions, session.RepoRoot, session.GitBranch, session.WorktreeManaged, session.Error, session.HarnessType, session.UpdatedAt, session.ID,
 	)
 	return err

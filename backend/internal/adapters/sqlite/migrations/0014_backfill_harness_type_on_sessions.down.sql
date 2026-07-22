@@ -1,0 +1,3 @@
+-- Data backfill is not reversible: it cannot distinguish rows that were
+-- genuinely empty before this migration from rows that legitimately have
+-- harness_type = 'claude' for other reasons.

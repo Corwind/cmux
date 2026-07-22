@@ -4,6 +4,8 @@
 // ClaudeType) live in each harness's own file (e.g. claude.go), not here.
 package harness
 
+import "time"
+
 // Type identifies a concrete harness implementation (e.g. "claude"). Concrete
 // values are defined alongside their implementation, not in this file.
 type Type string
@@ -113,4 +115,16 @@ type Harness interface {
 	// notification sequence. Only valid to call when HasNotificationSupport
 	// returns true.
 	ParseNotification(data []byte) (NotificationResult, bool)
+
+	// HasExternalSessionIDMinting reports whether the harness always mints its
+	// own session identifier at spawn time instead of accepting the one cmux
+	// supplies via SpawnIntent.SessionID, requiring callers to discover it
+	// afterwards via DiscoverSessionID.
+	HasExternalSessionIDMinting() bool
+
+	// DiscoverSessionID inspects harness-owned on-disk state to find the session
+	// ID the harness minted for the most recently started session rooted at
+	// workingDir, ignoring anything started before notBefore. Only valid to call
+	// when HasExternalSessionIDMinting returns true.
+	DiscoverSessionID(workingDir string, notBefore time.Time) (string, error)
 }

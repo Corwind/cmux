@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
 	"github.com/Corwind/cmux/backend/internal/harness"
@@ -94,4 +95,8 @@ func (f *fakeHarness) NeedsOpenURLWrapper() bool                   { return fals
 func (f *fakeHarness) SandboxPathGrants() []harness.PathGrant      { return nil }
 func (f *fakeHarness) ParseNotification([]byte) (harness.NotificationResult, bool) {
 	return harness.NotificationResult{}, false
+}
+func (f *fakeHarness) HasExternalSessionIDMinting() bool { return false }
+func (f *fakeHarness) DiscoverSessionID(workingDir string, notBefore time.Time) (string, error) {
+	return "", nil
 }

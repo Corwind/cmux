@@ -1,0 +1,7 @@
+CREATE TABLE worktrees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL UNIQUE,
+	branch TEXT NOT NULL DEFAULT '',
+	repo_root TEXT NOT NULL DEFAULT '',
+	created_at DATETIME NOT NULL
+);

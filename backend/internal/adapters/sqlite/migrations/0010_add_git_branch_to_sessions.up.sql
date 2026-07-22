@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN git_branch TEXT NOT NULL DEFAULT '';

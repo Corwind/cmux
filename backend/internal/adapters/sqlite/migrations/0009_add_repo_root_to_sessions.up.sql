@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN repo_root TEXT NOT NULL DEFAULT '';
