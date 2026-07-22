@@ -12,7 +12,12 @@ type PTYHandle struct {
 }
 
 type ProcessManager interface {
-	Spawn(ctx context.Context, workingDir string, args ...string) (*PTYHandle, error)
+	// Spawn starts a new process. harnessType identifies which harness
+	// implementation's env overrides, sandbox path grants, and open-URL-wrapper
+	// requirement should be applied (implementations resolve it via their own
+	// harness registry); an empty string falls back to the implementation's
+	// default harness.
+	Spawn(ctx context.Context, workingDir string, harnessType string, args ...string) (*PTYHandle, error)
 	Resize(pid int, rows, cols uint16) error
 	Kill(pid int) error
 	KillAll()

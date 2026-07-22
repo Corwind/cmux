@@ -6,6 +6,7 @@ import { SessionList } from "./SessionList";
 import { useSessionsStore } from "../stores/sessions.store";
 import { useNotificationStore } from "../stores/notification.store";
 import type { Session } from "../types";
+import type { Harness } from "@/features/harnesses";
 
 // These tests document the expected behavior for Phase 2 UI states.
 // The `provisioning` and `failed` statuses (plus `error_message` field) will
@@ -21,6 +22,7 @@ const baseSession: Session = {
   pid: 42,
   template_id: "tmpl-1",
   skip_permissions: false,
+  harness_type: "claude",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -29,6 +31,14 @@ function mockSessions(sessions: ExtendedSession[]) {
   server.use(
     http.get("/api/sessions", () => {
       return HttpResponse.json(sessions);
+    }),
+  );
+}
+
+function mockHarnesses(harnesses: Harness[]) {
+  server.use(
+    http.get("/api/harnesses", () => {
+      return HttpResponse.json(harnesses);
     }),
   );
 }
@@ -181,6 +191,57 @@ describe("SessionList", () => {
       await screen.findByText("Stopped Session");
       const resumeButton = screen.getByTitle("Resume session");
       expect(resumeButton).toBeInTheDocument();
+    });
+  });
+
+  describe("harness sections", () => {
+    it("groups sessions under their harness section name and orders sections by the registry", async () => {
+      mockHarnesses([
+        { type: "claude", section_name: "Claude Code", is_default: true },
+        { type: "codex", section_name: "Codex", is_default: false },
+      ]);
+      mockSessions([
+        { ...baseSession, id: "session-codex", name: "Codex Session", harness_type: "codex" },
+        { ...baseSession, id: "session-claude", name: "Claude Session", harness_type: "claude" },
+      ]);
+
+      render(<SessionList />);
+      await screen.findByText("Claude Session");
+      await screen.findByText("Codex Session");
+
+      const sectionHeaders = screen.getAllByText(
+        (text) => text === "Claude Code" || text === "Codex",
+      );
+      expect(sectionHeaders.map((el) => el.textContent)).toEqual(["Claude Code", "Codex"]);
+    });
+
+    it("does not render a section for a configured harness with no sessions", async () => {
+      mockHarnesses([
+        { type: "claude", section_name: "Claude Code", is_default: true },
+        { type: "codex", section_name: "Codex", is_default: false },
+      ]);
+      mockSessions([{ ...baseSession, harness_type: "claude" }]);
+
+      render(<SessionList />);
+      await screen.findByText("Test Session");
+
+      expect(screen.getByText("Claude Code")).toBeInTheDocument();
+      expect(screen.queryByText("Codex")).not.toBeInTheDocument();
+    });
+
+    it("falls back to the raw harness_type as the section header when it's absent from the harness list", async () => {
+      mockHarnesses([{ type: "claude", section_name: "Claude Code", is_default: true }]);
+      mockSessions([
+        { ...baseSession, id: "session-claude", harness_type: "claude" },
+        { ...baseSession, id: "session-unknown", name: "Unknown Harness Session", harness_type: "gemini" },
+      ]);
+
+      render(<SessionList />);
+      await screen.findByText("Test Session");
+      await screen.findByText("Unknown Harness Session");
+
+      expect(screen.getByText("Claude Code")).toBeInTheDocument();
+      expect(screen.getByText("gemini")).toBeInTheDocument();
     });
   });
 });

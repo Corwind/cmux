@@ -69,7 +69,7 @@ func newMockPM() *mockPM {
 	}
 }
 
-func (m *mockPM) Spawn(ctx context.Context, workingDir string, args ...string) (*ports.PTYHandle, error) {
+func (m *mockPM) Spawn(ctx context.Context, workingDir string, harnessType string, args ...string) (*ports.PTYHandle, error) {
 	done := make(chan error, 1)
 	h := &ports.PTYHandle{PTY: os.Stdin, PID: 42, Done: done}
 	m.alive[42] = true
@@ -287,6 +287,48 @@ func TestSessionHandler_Create_ResponseIncludesWorktreeFields(t *testing.T) {
 	_ = resp.RepoRoot
 	_ = resp.GitBranch
 	_ = resp.WorktreeManaged
+}
+
+func TestSessionHandler_Create_HarnessTypeRoundTrip(t *testing.T) {
+	handler, _ := setupHandler()
+
+	body, _ := json.Marshal(createSessionRequest{Name: "test", WorkingDir: "/tmp", HarnessType: "claude"})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handler.Create(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created sessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if created.HarnessType != "claude" {
+		t.Errorf("expected harness_type 'claude' in create response, got %q", created.HarnessType)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/sessions/"+created.ID, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", created.ID)
+	getReq = getReq.WithContext(context.WithValue(getReq.Context(), chi.RouteCtxKey, rctx))
+	getW := httptest.NewRecorder()
+
+	handler.Get(getW, getReq)
+
+	if getW.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getW.Code, getW.Body.String())
+	}
+
+	var fetched sessionResponse
+	if err := json.NewDecoder(getW.Body).Decode(&fetched); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if fetched.HarnessType != "claude" {
+		t.Errorf("expected harness_type 'claude' in get response, got %q", fetched.HarnessType)
+	}
 }
 
 func TestSessionHandler_Delete_NoParams(t *testing.T) {

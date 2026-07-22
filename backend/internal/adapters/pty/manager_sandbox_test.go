@@ -25,7 +25,7 @@ func TestSpawnWithSandbox(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	handle, err := m.Spawn(ctx, os.TempDir())
+	handle, err := m.Spawn(ctx, os.TempDir(), "")
 	if err != nil {
 		t.Fatalf("Spawn with sandbox failed: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestSandboxDeniesFileWriteOutsideWorkDir(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	handle, err := m.Spawn(ctx, workDir)
+	handle, err := m.Spawn(ctx, workDir, "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestSandboxAllowsFileWriteInWorkDir(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	handle, err := m.Spawn(ctx, workDir)
+	handle, err := m.Spawn(ctx, workDir, "")
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
@@ -137,4 +137,3 @@ func TestSandboxAllowsFileWriteInWorkDir(t *testing.T) {
 		t.Fatalf("expected sandbox to allow file write in working directory: %v", err)
 	}
 }
-

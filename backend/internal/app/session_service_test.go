@@ -26,6 +26,15 @@ type mockRepo struct {
 	updateErr error // if set, Update returns this error
 }
 
+// registryWithClaude builds a *harness.Registry with a single Claude harness
+// registered as the default, mirroring the fallback registry NewSessionService
+// builds when no WithHarnessRegistry option is supplied.
+func registryWithClaude(cfg domain.ClaudeConfig) *harness.Registry {
+	r := harness.NewRegistry()
+	r.Register(harness.NewClaudeHarness(cfg), "Claude Code")
+	return r
+}
+
 func newMockRepo() *mockRepo {
 	return &mockRepo{sessions: make(map[string]domain.Session)}
 }
@@ -102,7 +111,7 @@ func newMockProcessManager() *mockProcessManager {
 	}
 }
 
-func (m *mockProcessManager) Spawn(ctx context.Context, workingDir string, args ...string) (*ports.PTYHandle, error) {
+func (m *mockProcessManager) Spawn(ctx context.Context, workingDir string, harnessType string, args ...string) (*ports.PTYHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.spawnArgs = args
@@ -1745,7 +1754,7 @@ func TestProvisionWorktree_SyncMap_ConcurrentAccessNoPanic(t *testing.T) {
 func TestCreateSession_WithClaudeModel_PassesModelArg(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm, nil, WithHarness(harness.NewClaudeHarness(domain.ClaudeConfig{Model: "claude-opus-4-8"})))
+	svc := NewSessionService(repo, pm, nil, WithHarnessRegistry(registryWithClaude(domain.ClaudeConfig{Model: "claude-opus-4-8"})))
 
 	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
 	if err != nil {
@@ -1785,10 +1794,39 @@ func TestCreateSession_WithoutClaudeModel_NoModelArg(t *testing.T) {
 	}
 }
 
+func TestCreateSession_WithUnknownHarnessType_FallsBackToDefault(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	svc := NewSessionService(repo, pm, nil, WithHarnessRegistry(registryWithClaude(domain.ClaudeConfig{Model: "claude-opus-4-8"})))
+
+	session, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp", HarnessType: "nonexistent-harness"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if session.HarnessType != string(harness.ClaudeType) {
+		t.Errorf("expected session to fall back to default harness type %q, got %q", harness.ClaudeType, session.HarnessType)
+	}
+
+	args := pm.spawnArgs
+	modelIdx := -1
+	for i, arg := range args {
+		if arg == "--model" {
+			modelIdx = i
+			break
+		}
+	}
+	if modelIdx == -1 {
+		t.Fatalf("expected --model flag in spawn args (from default harness), got %v", args)
+	}
+	if modelIdx+1 >= len(args) || args[modelIdx+1] != "claude-opus-4-8" {
+		t.Errorf("expected model value 'claude-opus-4-8' after --model, got %v", args)
+	}
+}
+
 func TestResumeSession_WithClaudeModel_PassesModelArg(t *testing.T) {
 	repo := newMockRepo()
 	pm := newMockProcessManager()
-	svc := NewSessionService(repo, pm, nil, WithHarness(harness.NewClaudeHarness(domain.ClaudeConfig{Model: "claude-sonnet-4-6"})))
+	svc := NewSessionService(repo, pm, nil, WithHarnessRegistry(registryWithClaude(domain.ClaudeConfig{Model: "claude-sonnet-4-6"})))
 
 	created, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
 	if err != nil {
@@ -1829,7 +1867,7 @@ func TestCreateSession_WithWorktree_WithClaudeModel_PassesModelArg(t *testing.T)
 	git := newMockGitService()
 	svc := NewSessionService(repo, pm, nil,
 		WithGitService(git, "/tmp/worktrees"),
-		WithHarness(harness.NewClaudeHarness(domain.ClaudeConfig{Model: "claude-haiku-4-5"})),
+		WithHarnessRegistry(registryWithClaude(domain.ClaudeConfig{Model: "claude-haiku-4-5"})),
 	)
 
 	input := CreateSessionInput{

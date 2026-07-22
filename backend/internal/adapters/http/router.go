@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Corwind/cmux/backend/internal/app"
+	"github.com/Corwind/cmux/backend/internal/harness"
 	"github.com/Corwind/cmux/backend/internal/ports"
 	"github.com/Corwind/cmux/backend/internal/static"
 	"github.com/go-chi/chi/v5"
@@ -16,7 +17,7 @@ import (
 // NewRouter builds the main HTTP router. wsHandler must already be fully wired
 // (service set, hub injected) before being passed in; this avoids the circular
 // dependency between hub initialisation and SessionService construction.
-func NewRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, gitService ports.GitService, port string, wsHandler *WebSocketHandler) http.Handler {
+func NewRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, gitService ports.GitService, port string, wsHandler *WebSocketHandler, harnessRegistry *harness.Registry) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -34,6 +35,7 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 	openHandler := NewOpenHandler()
 	gitHandler := NewGitHandler(gitService)
 	worktreeHandler := NewWorktreeHandler(sessionService)
+	harnessHandler := NewHarnessHandler(harnessRegistry)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/sessions", sessionHandler.List)
@@ -52,6 +54,8 @@ func NewRouter(sessionService *app.SessionService, templateService *app.Template
 		r.Delete("/templates/{id}", templateHandler.Delete)
 		r.Post("/templates/{id}/default", templateHandler.SetDefault)
 		r.Get("/templates/{id}/export", templateHandler.Export)
+
+		r.Get("/harnesses", harnessHandler.List)
 
 		r.Get("/fs", fsHandler.ListDirectory)
 		r.Post("/open", openHandler.Handle)
@@ -98,7 +102,7 @@ func mountSPA(r chi.Router) {
 
 // NewTestRouter creates a router with permissive WebSocket origin patterns for testing.
 // If wsHandler is nil a default one is constructed from sessionService.
-func NewTestRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, gitService ports.GitService) http.Handler {
+func NewTestRouter(sessionService *app.SessionService, templateService *app.TemplateService, fileBrowser ports.FileBrowser, gitService ports.GitService, harnessRegistry *harness.Registry) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -116,6 +120,7 @@ func NewTestRouter(sessionService *app.SessionService, templateService *app.Temp
 	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}))
 	gitHandler := NewGitHandler(gitService)
 	worktreeHandler := NewWorktreeHandler(sessionService)
+	harnessHandler := NewHarnessHandler(harnessRegistry)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/sessions", sessionHandler.List)
@@ -134,6 +139,8 @@ func NewTestRouter(sessionService *app.SessionService, templateService *app.Temp
 		r.Delete("/templates/{id}", templateHandler.Delete)
 		r.Post("/templates/{id}/default", templateHandler.SetDefault)
 		r.Get("/templates/{id}/export", templateHandler.Export)
+
+		r.Get("/harnesses", harnessHandler.List)
 
 		r.Get("/fs", fsHandler.ListDirectory)
 		r.Get("/git/info", gitHandler.Info)

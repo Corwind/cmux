@@ -36,12 +36,12 @@ func (b *ptyBridge) getConn() *websocket.Conn {
 }
 
 type WebSocketHandler struct {
-	service        *app.SessionService
-	hub            *notificationHub
-	mu             sync.Mutex
-	bridges        map[string]*ptyBridge
-	originPatterns []string
-	harness        harness.Harness
+	service         *app.SessionService
+	hub             *notificationHub
+	mu              sync.Mutex
+	bridges         map[string]*ptyBridge
+	originPatterns  []string
+	harnessRegistry *harness.Registry
 }
 
 type WebSocketOption func(*WebSocketHandler)
@@ -52,11 +52,12 @@ func WithOriginPatterns(patterns []string) WebSocketOption {
 	}
 }
 
-// WithHarness wires the harness strategy used to detect and parse
-// notification sequences in PTY output.
-func WithHarness(h harness.Harness) WebSocketOption {
+// WithHarnessRegistry wires the harness registry used to resolve, per
+// session, the harness strategy for detecting and parsing notification
+// sequences in PTY output.
+func WithHarnessRegistry(r *harness.Registry) WebSocketOption {
 	return func(wh *WebSocketHandler) {
-		wh.harness = h
+		wh.harnessRegistry = r
 	}
 }
 
@@ -90,6 +91,22 @@ type resizeMessage struct {
 	Cols uint16 `json:"cols"`
 }
 
+// resolveSessionHarness returns the Harness registered for sessionID's
+// HarnessType, falling back to the registry's Default() when the session
+// can't be looked up or its type isn't registered. Returns nil if no registry
+// is wired.
+func (h *WebSocketHandler) resolveSessionHarness(sessionID string) harness.Harness {
+	if h.harnessRegistry == nil {
+		return nil
+	}
+	if session, err := h.service.GetSession(context.Background(), sessionID); err == nil {
+		if sessionHarness, ok := h.harnessRegistry.Get(harness.Type(session.HarnessType)); ok {
+			return sessionHarness
+		}
+	}
+	return h.harnessRegistry.Default()
+}
+
 func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) *ptyBridge {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -107,6 +124,11 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 	// whether a WebSocket client is currently connected, so notification detection
 	// works for background sessions too.
 	go func() {
+		// Resolved once per session lifetime rather than per PTY chunk — the
+		// session's harness type doesn't change after spawn, so re-resolving
+		// it on every read would mean a DB lookup per output chunk.
+		sessionHarness := h.resolveSessionHarness(sessionID)
+
 		buf := make([]byte, 4096)
 		for {
 			n, err := handle.PTY.Read(buf)
@@ -127,8 +149,8 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 			data := make([]byte, n)
 			copy(data, buf[:n])
 
-			if h.harness != nil && h.harness.HasNotificationSupport() {
-				if result, ok := h.harness.ParseNotification(data); ok {
+			if sessionHarness != nil && sessionHarness.HasNotificationSupport() {
+				if result, ok := sessionHarness.ParseNotification(data); ok {
 					name := sessionID
 					if session, sErr := h.service.GetSession(context.Background(), sessionID); sErr == nil {
 						name = session.Name

@@ -6,6 +6,7 @@ export interface Session {
   pid: number;
   template_id: string;
   skip_permissions: boolean;
+  harness_type: string;
   repo_root?: string;
   git_branch?: string;
   worktree_managed?: boolean;
@@ -27,6 +28,7 @@ export interface CreateSessionInput {
   working_dir: string;
   template_id?: string;
   skip_permissions?: boolean;
+  harness_type?: string;
   worktree?: WorktreeInput;
 }
 

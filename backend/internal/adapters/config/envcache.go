@@ -11,12 +11,12 @@ import (
 // the stale cached value and triggers a background refresh, so callers are
 // never blocked by a shell spawn.
 type EnvCache struct {
-	mu          sync.RWMutex
-	env         []string
-	resolvedAt  time.Time
-	ttl         time.Duration
-	resolver    func() []string
-	refreshing  bool // true while a background refresh is in flight
+	mu         sync.RWMutex
+	env        []string
+	resolvedAt time.Time
+	ttl        time.Duration
+	resolver   func() []string
+	refreshing bool // true while a background refresh is in flight
 }
 
 // NewEnvCache creates a cache and synchronously resolves the shell environment.
