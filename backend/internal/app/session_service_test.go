@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -278,6 +279,34 @@ func createInput(name, workingDir string) CreateSessionInput {
 	return CreateSessionInput{Name: name, WorkingDir: workingDir}
 }
 
+// --- Fake harness with external session ID minting ---
+// fakeExternalIDHarness wraps a ClaudeHarness to report
+// HasExternalSessionIDMinting() == true and delegate DiscoverSessionID to a
+// test-controlled function, exercising the post-spawn discovery path without
+// needing a real Codex rollout file on disk.
+
+type fakeExternalIDHarness struct {
+	*harness.ClaudeHarness
+	discoverFn func(workingDir string, notBefore time.Time) (string, error)
+}
+
+func (f *fakeExternalIDHarness) HasExternalSessionIDMinting() bool {
+	return true
+}
+
+func (f *fakeExternalIDHarness) DiscoverSessionID(workingDir string, notBefore time.Time) (string, error) {
+	return f.discoverFn(workingDir, notBefore)
+}
+
+func registryWithFakeExternalID(discoverFn func(workingDir string, notBefore time.Time) (string, error)) *harness.Registry {
+	r := harness.NewRegistry()
+	r.Register(&fakeExternalIDHarness{
+		ClaudeHarness: harness.NewClaudeHarness(domain.ClaudeConfig{}),
+		discoverFn:    discoverFn,
+	}, "Fake External ID Harness")
+	return r
+}
+
 // --- Tests ---
 
 func TestCreateSession_Success(t *testing.T) {
@@ -326,6 +355,115 @@ func TestCreateSession_EmptyWorkingDir(t *testing.T) {
 	_, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test"})
 	if err == nil {
 		t.Fatal("expected error for empty working dir")
+	}
+}
+
+func TestCreateSession_DiscoversExternalSessionID_Success(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	const discoveredID = "harness-minted-id"
+	registry := registryWithFakeExternalID(func(workingDir string, notBefore time.Time) (string, error) {
+		return discoveredID, nil
+	})
+	svc := NewSessionService(repo, pm, nil, WithHarnessRegistry(registry))
+
+	s, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Discovery runs in a background goroutine (see discoverAndPersistSessionID)
+	// so it never blocks session creation on a harness's slow startup; poll
+	// for the persisted update instead of asserting on the returned struct.
+	stored := waitForHarnessSessionID(t, repo, s.ID, s.HarnessSessionID, 2*time.Second)
+	if stored.HarnessSessionID != discoveredID {
+		t.Errorf("expected persisted discovered session id %q, got %q", discoveredID, stored.HarnessSessionID)
+	}
+}
+
+// TestCreateSession_DiscoversExternalSessionID_ResolvesSymlinkedWorkingDir
+// guards against a real bug: pty.Manager.Spawn resolves symlinks before
+// setting the harness process's cwd (e.g. /tmp -> /private/tmp on macOS), so
+// a harness like Codex records the *resolved* path in its own on-disk
+// session state. If discoverSessionIDWithRetry passed the raw, unresolved
+// working dir through, the cwd comparison inside DiscoverSessionID would
+// never match, discovery would always fail, and every session would
+// silently fall back to cmux's own session ID instead of the harness-minted
+// one — breaking resume.
+func TestCreateSession_DiscoversExternalSessionID_ResolvesSymlinkedWorkingDir(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	const discoveredID = "harness-minted-id"
+
+	tmpDir := t.TempDir()
+	linkDir := filepath.Join(tmpDir, "link")
+	realDir := filepath.Join(tmpDir, "real")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatalf("failed to create real dir: %v", err)
+	}
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	// Discovery now runs in a background goroutine (see
+	// discoverAndPersistSessionID), so the fake harness's DiscoverSessionID
+	// call races the test goroutine; hand the observed workingDir back over a
+	// channel instead of a bare variable to avoid a data race.
+	gotWorkingDir := make(chan string, 1)
+	registry := registryWithFakeExternalID(func(workingDir string, notBefore time.Time) (string, error) {
+		gotWorkingDir <- workingDir
+		return discoveredID, nil
+	})
+	svc := NewSessionService(repo, pm, nil, WithHarnessRegistry(registry))
+
+	if _, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: linkDir}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolvedRealDir, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatalf("failed to resolve real dir: %v", err)
+	}
+
+	select {
+	case got := <-gotWorkingDir:
+		if got != resolvedRealDir {
+			t.Errorf("expected DiscoverSessionID to receive the symlink-resolved dir %q, got %q", resolvedRealDir, got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for DiscoverSessionID to be called")
+	}
+}
+
+func TestCreateSession_DiscoversExternalSessionID_FallsBackOnFailure(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	discoverErr := errors.New("no matching rollout file")
+	registry := registryWithFakeExternalID(func(workingDir string, notBefore time.Time) (string, error) {
+		return "", discoverErr
+	})
+	// The background discovery goroutine retries for up to 30s in production
+	// (see defaultDiscoverRetryAttempts/Interval); shrink that here so a
+	// permanently-failing fake harness's leaked goroutine finishes quickly
+	// instead of retrying for the full real-world budget past this test.
+	svc := NewSessionService(repo, pm, nil, WithHarnessRegistry(registry), WithDiscoverRetryConfig(3, time.Millisecond))
+
+	s, err := svc.CreateSession(context.Background(), CreateSessionInput{Name: "test", WorkingDir: "/tmp"})
+	if err != nil {
+		t.Fatalf("expected session creation to succeed despite discovery failure, got err: %v", err)
+	}
+	if s.HarnessSessionID == "" {
+		t.Fatal("expected fallback to a non-empty, originally-minted session id")
+	}
+
+	// discoverAndPersistSessionID never calls repo.Update on discovery
+	// failure, so the persisted id can't change regardless of when the
+	// background goroutine finishes retrying — no need to wait for it here.
+	stored, err := repo.Get(context.Background(), s.ID)
+	if err != nil {
+		t.Fatalf("session not found in repo: %v", err)
+	}
+	if stored.HarnessSessionID != s.HarnessSessionID {
+		t.Errorf("expected persisted session id %q to match returned session id %q", stored.HarnessSessionID, s.HarnessSessionID)
 	}
 }
 
@@ -1111,6 +1249,24 @@ func waitForSessionStatus(t *testing.T, repo *mockRepo, sessionID string, want d
 	}
 	s, _ := repo.Get(context.Background(), sessionID)
 	t.Fatalf("timed out waiting for session %s to reach status %q (got %q)", sessionID, want, s.Status)
+	return domain.Session{}
+}
+
+// waitForHarnessSessionID polls the repo until the session's HarnessSessionID
+// changes from its initial value, since discoverAndPersistSessionID runs in a
+// background goroutine detached from CreateSession/provisionWorktree.
+func waitForHarnessSessionID(t *testing.T, repo *mockRepo, sessionID, initial string, timeout time.Duration) domain.Session {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		s, err := repo.Get(context.Background(), sessionID)
+		if err == nil && s.HarnessSessionID != initial {
+			return s
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s, _ := repo.Get(context.Background(), sessionID)
+	t.Fatalf("timed out waiting for session %s HarnessSessionID to change from %q (still %q)", sessionID, initial, s.HarnessSessionID)
 	return domain.Session{}
 }
 

@@ -8,7 +8,7 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	// Unset all env vars that could affect the result
-	for _, key := range []string{"CMUX_CONFIG_PATH", "CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL"} {
+	for _, key := range []string{"CMUX_CONFIG_PATH", "CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL"} {
 		t.Setenv(key, "")
 	}
 	// Point config path to a non-existent file so no TOML is loaded
@@ -231,7 +231,7 @@ port = "4000"
 		t.Fatalf("write config file: %v", err)
 	}
 
-	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL"} {
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL"} {
 		t.Setenv(key, "")
 	}
 	t.Setenv("CMUX_CONFIG_PATH", configFile)
@@ -253,6 +253,12 @@ port = "4000"
 	}
 	if cfg.Claude.Model != "" {
 		t.Errorf("expected empty claude model by default, got %q", cfg.Claude.Model)
+	}
+	if cfg.Codex.Model != "" {
+		t.Errorf("expected empty codex model by default, got %q", cfg.Codex.Model)
+	}
+	if cfg.Codex.Home != "" {
+		t.Errorf("expected empty codex home by default, got %q", cfg.Codex.Home)
 	}
 }
 
@@ -342,6 +348,9 @@ func TestLoadHarnessesDefaults(t *testing.T) {
 	if cfg.Claude.SectionName != "Claude Code" {
 		t.Errorf("expected default claude section_name 'Claude Code', got %q", cfg.Claude.SectionName)
 	}
+	if cfg.Codex.SectionName != "Codex" {
+		t.Errorf("expected default codex section_name 'Codex', got %q", cfg.Codex.SectionName)
+	}
 }
 
 func TestLoadHarnessesFromTOML(t *testing.T) {
@@ -401,5 +410,129 @@ section_name = "My Claude"
 	// harnesses should still default since not set in TOML
 	if len(cfg.Harnesses) != 1 || cfg.Harnesses[0] != "claude" {
 		t.Errorf("expected default harnesses ['claude'], got %v", cfg.Harnesses)
+	}
+}
+
+func TestLoadCodexModelFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[codex]
+model = "gpt-5-codex"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CODEX_MODEL"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Codex.Model != "gpt-5-codex" {
+		t.Errorf("expected codex model 'gpt-5-codex', got %q", cfg.Codex.Model)
+	}
+}
+
+func TestLoadCodexModelFromEnvVar(t *testing.T) {
+	t.Setenv("CMUX_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.toml"))
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("CMUX_CODEX_MODEL", "gpt-5-codex-mini")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Codex.Model != "gpt-5-codex-mini" {
+		t.Errorf("expected codex model 'gpt-5-codex-mini', got %q", cfg.Codex.Model)
+	}
+}
+
+func TestLoadCodexModelTOMLOverridesEnvVar(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[codex]
+model = "gpt-5-codex"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CODEX_MODEL", "gpt-5-codex-mini")
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
+		t.Setenv(key, "")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Codex.Model != "gpt-5-codex" {
+		t.Errorf("expected TOML codex model 'gpt-5-codex' to override env var, got %q", cfg.Codex.Model)
+	}
+}
+
+func TestLoadCodexSectionNameOverridesDefault(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[codex]
+section_name = "My Codex"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Codex.SectionName != "My Codex" {
+		t.Errorf("expected codex section_name 'My Codex', got %q", cfg.Codex.SectionName)
+	}
+	// harnesses should still default since not set in TOML
+	if len(cfg.Harnesses) != 1 || cfg.Harnesses[0] != "claude" {
+		t.Errorf("expected default harnesses ['claude'], got %v", cfg.Harnesses)
+	}
+}
+
+func TestLoadCodexHomeFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[codex]
+home = "/tmp/custom-codex-home"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Codex.Home != "/tmp/custom-codex-home" {
+		t.Errorf("expected codex home '/tmp/custom-codex-home', got %q", cfg.Codex.Home)
 	}
 }

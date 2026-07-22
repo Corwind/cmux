@@ -1,6 +1,10 @@
 package harness
 
-import "testing"
+import (
+	"errors"
+	"testing"
+	"time"
+)
 
 // stubHarness is a minimal Harness implementation used only to exercise
 // Registry behavior independent of any concrete harness.
@@ -21,6 +25,10 @@ func (s stubHarness) NeedsOpenURLWrapper() bool                   { return false
 func (s stubHarness) SandboxPathGrants() []PathGrant              { return nil }
 func (s stubHarness) ParseNotification(data []byte) (NotificationResult, bool) {
 	return NotificationResult{}, false
+}
+func (s stubHarness) HasExternalSessionIDMinting() bool { return false }
+func (s stubHarness) DiscoverSessionID(workingDir string, notBefore time.Time) (string, error) {
+	return "", errors.New("not supported")
 }
 
 func TestRegistry_Default_EmptyReturnsNil(t *testing.T) {

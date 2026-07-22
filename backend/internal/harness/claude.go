@@ -2,7 +2,9 @@ package harness
 
 import (
 	"bytes"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
 )
@@ -176,6 +178,18 @@ func hasStandaloneBell(data []byte) bool {
 		}
 	}
 	return false
+}
+
+// HasExternalSessionIDMinting reports that Claude Code does not mint its own
+// session ID — it always accepts the one cmux supplies via --session-id.
+func (h *ClaudeHarness) HasExternalSessionIDMinting() bool {
+	return false
+}
+
+// DiscoverSessionID is not supported: Claude Code already dictates its own
+// session ID via --session-id and never needs post-spawn discovery.
+func (h *ClaudeHarness) DiscoverSessionID(workingDir string, notBefore time.Time) (string, error) {
+	return "", errors.New("claude harness does not support external session id discovery")
 }
 
 // classifyNotification maps a notification message to an event type.

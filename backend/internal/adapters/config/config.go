@@ -16,6 +16,7 @@ type tomlConfig struct {
 	Shell     tomlShell         `toml:"shell"`
 	Git       tomlGit           `toml:"git"`
 	Claude    tomlClaude        `toml:"claude"`
+	Codex     tomlCodex         `toml:"codex"`
 	Env       map[string]string `toml:"env"`
 	Harnesses []string          `toml:"harnesses"`
 }
@@ -23,6 +24,12 @@ type tomlConfig struct {
 type tomlClaude struct {
 	Model       string `toml:"model"`
 	SectionName string `toml:"section_name"`
+}
+
+type tomlCodex struct {
+	Model       string `toml:"model"`
+	SectionName string `toml:"section_name"`
+	Home        string `toml:"home"`
 }
 
 type tomlGit struct {
@@ -88,6 +95,9 @@ func defaults() domain.Config {
 		Claude: domain.ClaudeConfig{
 			SectionName: "Claude Code",
 		},
+		Codex: domain.CodexConfig{
+			SectionName: "Codex",
+		},
 		Harnesses: []string{"claude"},
 	}
 }
@@ -107,6 +117,9 @@ func applyEnvVars(cfg *domain.Config) {
 	}
 	if v := os.Getenv("CMUX_CLAUDE_MODEL"); v != "" {
 		cfg.Claude.Model = v
+	}
+	if v := os.Getenv("CMUX_CODEX_MODEL"); v != "" {
+		cfg.Codex.Model = v
 	}
 }
 
@@ -154,6 +167,15 @@ func loadFile(path string, cfg *domain.Config) error {
 	}
 	if tc.Claude.SectionName != "" {
 		cfg.Claude.SectionName = tc.Claude.SectionName
+	}
+	if tc.Codex.Model != "" {
+		cfg.Codex.Model = tc.Codex.Model
+	}
+	if tc.Codex.SectionName != "" {
+		cfg.Codex.SectionName = tc.Codex.SectionName
+	}
+	if tc.Codex.Home != "" {
+		cfg.Codex.Home = tc.Codex.Home
 	}
 	if len(tc.Harnesses) > 0 {
 		cfg.Harnesses = tc.Harnesses

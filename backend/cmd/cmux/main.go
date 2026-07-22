@@ -53,6 +53,7 @@ func main() {
 		sectionName string
 	}{
 		harness.ClaudeType: {harness.NewClaudeHarness(cfg.Claude), cfg.Claude.SectionName},
+		harness.CodexType:  {harness.NewCodexHarness(cfg.Codex), cfg.Codex.SectionName},
 	}
 
 	registry := harness.NewRegistry()
