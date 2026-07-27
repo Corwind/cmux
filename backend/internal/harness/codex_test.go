@@ -30,7 +30,7 @@ func TestCodexHarness_BuildSpawnArgs_New(t *testing.T) {
 	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: false})
 	want := []string{
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -43,7 +43,7 @@ func TestCodexHarness_BuildSpawnArgs_Resume(t *testing.T) {
 	want := []string{
 		"resume", "sess-1",
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -55,7 +55,7 @@ func TestCodexHarness_BuildSpawnArgs_SkipPermissions(t *testing.T) {
 	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: false, SkipPermissions: true})
 	want := []string{
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 		"--dangerously-bypass-approvals-and-sandbox",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -68,7 +68,7 @@ func TestCodexHarness_BuildSpawnArgs_WithModel(t *testing.T) {
 	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: false})
 	want := []string{
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 		"-m", "gpt-5-codex",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -81,7 +81,7 @@ func TestCodexHarness_BuildSpawnArgs_WithoutModel(t *testing.T) {
 	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: false})
 	want := []string{
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)

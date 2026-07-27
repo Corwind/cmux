@@ -119,6 +119,30 @@ func TestWebSocketResize(t *testing.T) {
 	}
 }
 
+// TestShouldNotify_OnlyWaitingInput guards against notification spam:
+// cmux's harnesses (Claude, Codex) can emit OSC sequences for both
+// attention-needed events (permission/approval prompts) and purely
+// informational ones (turn complete). Only the former should reach
+// /ws/notifications subscribers — shouldNotify is the single dispatch-point
+// filter getBridge's PTY reader goroutine applies, for every harness.
+func TestShouldNotify_OnlyWaitingInput(t *testing.T) {
+	tests := []struct {
+		eventType string
+		want      bool
+	}{
+		{"waiting_input", true},
+		{"task_complete", false},
+		{"generic", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		got := shouldNotify(harness.NotificationResult{EventType: tt.eventType, Message: "irrelevant"})
+		if got != tt.want {
+			t.Errorf("shouldNotify(EventType=%q) = %v, want %v", tt.eventType, got, tt.want)
+		}
+	}
+}
+
 func TestWebSocketProcessExit(t *testing.T) {
 	server, service := setupTestServer(t)
 

@@ -117,7 +117,7 @@ func NewTestRouter(sessionService *app.SessionService, templateService *app.Temp
 	sessionHandler := NewSessionHandler(sessionService)
 	templateHandler := NewTemplateHandler(templateService)
 	fsHandler := NewFilesystemHandler(fileBrowser)
-	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}))
+	wsHandler := NewWebSocketHandler(sessionService, WithOriginPatterns([]string{"*"}), WithHarnessRegistry(harnessRegistry))
 	gitHandler := NewGitHandler(gitService)
 	worktreeHandler := NewWorktreeHandler(sessionService)
 	harnessHandler := NewHarnessHandler(harnessRegistry)

@@ -88,9 +88,13 @@ func (h *CodexHarness) BuildSpawnArgs(intent SpawnIntent) []string {
 	if intent.Resume {
 		args = append(args, "resume", intent.SessionID)
 	}
+	// Only ask Codex to notify on approval-requested — cmux's own dispatch
+	// (websocket_handler.go) also filters to attention-needed events only,
+	// but there's no reason to have Codex emit and cmux scan OSC 9 pings for
+	// agent-turn-complete when they'd be dropped anyway.
 	args = append(args,
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 	)
 	if intent.SkipPermissions {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
