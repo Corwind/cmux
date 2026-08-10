@@ -107,6 +107,15 @@ func (h *WebSocketHandler) resolveSessionHarness(sessionID string) harness.Harne
 	return h.harnessRegistry.Default()
 }
 
+// shouldNotify reports whether a parsed harness notification needs the
+// user's attention (a permission/approval prompt) and should be surfaced to
+// /ws/notifications subscribers. Purely informational events (e.g. "turn
+// complete") are dropped here rather than left to the frontend to filter,
+// since every harness routes through this one dispatch point.
+func shouldNotify(result harness.NotificationResult) bool {
+	return result.EventType == "waiting_input"
+}
+
 func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) *ptyBridge {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -150,7 +159,7 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 			copy(data, buf[:n])
 
 			if sessionHarness != nil && sessionHarness.HasNotificationSupport() {
-				if result, ok := sessionHarness.ParseNotification(data); ok {
+				if result, ok := sessionHarness.ParseNotification(data); ok && shouldNotify(result) {
 					name := sessionID
 					if session, sErr := h.service.GetSession(context.Background(), sessionID); sErr == nil {
 						name = session.Name

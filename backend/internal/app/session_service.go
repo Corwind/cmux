@@ -85,10 +85,11 @@ func NewSessionService(repo ports.SessionRepository, pm ports.ProcessManager, te
 	}
 	// Callers (mainly tests) that don't inject a registry via WithHarnessRegistry
 	// get the same Claude behavior as before this package existed, with no model
-	// set.
+	// set. NotificationsEnabled: true matches config.defaults()'s root+per-harness
+	// default of "on" — this fallback bypasses that config loading path entirely.
 	if s.harnessRegistry == nil {
 		s.harnessRegistry = harness.NewRegistry()
-		s.harnessRegistry.Register(harness.NewClaudeHarness(domain.ClaudeConfig{}), "Claude Code")
+		s.harnessRegistry.Register(harness.NewClaudeHarness(domain.ClaudeConfig{NotificationsEnabled: true}), "Claude Code")
 	}
 	return s
 }

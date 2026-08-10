@@ -26,11 +26,11 @@ func TestCodexHarness_BinaryName(t *testing.T) {
 }
 
 func TestCodexHarness_BuildSpawnArgs_New(t *testing.T) {
-	h := NewCodexHarness(domain.CodexConfig{})
+	h := NewCodexHarness(domain.CodexConfig{NotificationsEnabled: true})
 	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: false})
 	want := []string{
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -38,12 +38,12 @@ func TestCodexHarness_BuildSpawnArgs_New(t *testing.T) {
 }
 
 func TestCodexHarness_BuildSpawnArgs_Resume(t *testing.T) {
-	h := NewCodexHarness(domain.CodexConfig{})
+	h := NewCodexHarness(domain.CodexConfig{NotificationsEnabled: true})
 	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: true})
 	want := []string{
 		"resume", "sess-1",
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -51,11 +51,11 @@ func TestCodexHarness_BuildSpawnArgs_Resume(t *testing.T) {
 }
 
 func TestCodexHarness_BuildSpawnArgs_SkipPermissions(t *testing.T) {
-	h := NewCodexHarness(domain.CodexConfig{})
+	h := NewCodexHarness(domain.CodexConfig{NotificationsEnabled: true})
 	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: false, SkipPermissions: true})
 	want := []string{
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 		"--dangerously-bypass-approvals-and-sandbox",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -64,11 +64,11 @@ func TestCodexHarness_BuildSpawnArgs_SkipPermissions(t *testing.T) {
 }
 
 func TestCodexHarness_BuildSpawnArgs_WithModel(t *testing.T) {
-	h := NewCodexHarness(domain.CodexConfig{Model: "gpt-5-codex"})
+	h := NewCodexHarness(domain.CodexConfig{Model: "gpt-5-codex", NotificationsEnabled: true})
 	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: false})
 	want := []string{
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 		"-m", "gpt-5-codex",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -77,14 +77,32 @@ func TestCodexHarness_BuildSpawnArgs_WithModel(t *testing.T) {
 }
 
 func TestCodexHarness_BuildSpawnArgs_WithoutModel(t *testing.T) {
-	h := NewCodexHarness(domain.CodexConfig{Model: ""})
+	h := NewCodexHarness(domain.CodexConfig{Model: "", NotificationsEnabled: true})
 	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: false})
 	want := []string{
 		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["agent-turn-complete","approval-requested"]`,
+		"-c", `tui.notifications=["approval-requested"]`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestCodexHarness_BuildSpawnArgs_NotificationsDisabled(t *testing.T) {
+	h := NewCodexHarness(domain.CodexConfig{NotificationsEnabled: false})
+	got := h.BuildSpawnArgs(SpawnIntent{SessionID: "sess-1", Resume: false, SkipPermissions: true})
+	want := []string{"--dangerously-bypass-approvals-and-sandbox"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v — expected no -c notification flags when disabled", got, want)
+	}
+}
+
+func TestCodexHarness_HasNotificationSupport_ReflectsConfig(t *testing.T) {
+	if h := NewCodexHarness(domain.CodexConfig{NotificationsEnabled: true}); !h.HasNotificationSupport() {
+		t.Error("expected HasNotificationSupport() true when NotificationsEnabled: true")
+	}
+	if h := NewCodexHarness(domain.CodexConfig{NotificationsEnabled: false}); h.HasNotificationSupport() {
+		t.Error("expected HasNotificationSupport() false when NotificationsEnabled: false")
 	}
 }
 

@@ -3,7 +3,18 @@ package harness
 import (
 	"reflect"
 	"testing"
+
+	"github.com/Corwind/cmux/backend/internal/domain"
 )
+
+func TestClaudeHarness_HasNotificationSupport_ReflectsConfig(t *testing.T) {
+	if h := NewClaudeHarness(domain.ClaudeConfig{NotificationsEnabled: true}); !h.HasNotificationSupport() {
+		t.Error("expected HasNotificationSupport() true when NotificationsEnabled: true")
+	}
+	if h := NewClaudeHarness(domain.ClaudeConfig{NotificationsEnabled: false}); h.HasNotificationSupport() {
+		t.Error("expected HasNotificationSupport() false when NotificationsEnabled: false")
+	}
+}
 
 func TestClaudeHarness_BuildSpawnArgs_Create(t *testing.T) {
 	h := &ClaudeHarness{}

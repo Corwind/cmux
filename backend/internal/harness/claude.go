@@ -14,13 +14,16 @@ const ClaudeType Type = "claude"
 
 // ClaudeHarness implements Harness for the Claude Code CLI.
 type ClaudeHarness struct {
-	model string
+	model                string
+	notificationsEnabled bool
 }
 
 // NewClaudeHarness constructs a ClaudeHarness configured with the model from
-// cfg, if any.
+// cfg, if any. cfg.NotificationsEnabled is expected to already be the
+// effective value (root NotificationConfig.Enabled AND this harness's own
+// setting) — ClaudeHarness itself doesn't know about the root switch.
 func NewClaudeHarness(cfg domain.ClaudeConfig) *ClaudeHarness {
-	return &ClaudeHarness{model: cfg.Model}
+	return &ClaudeHarness{model: cfg.Model, notificationsEnabled: cfg.NotificationsEnabled}
 }
 
 // Type returns ClaudeType.
@@ -49,10 +52,12 @@ func (h *ClaudeHarness) HasModelSelection() bool {
 	return true
 }
 
-// HasNotificationSupport reports that Claude Code emits parseable
-// notification sequences.
+// HasNotificationSupport reports whether Claude Code notifications are
+// enabled for this harness instance (see NewClaudeHarness) — Claude Code is
+// always technically capable of emitting parseable notification sequences,
+// but this gates whether cmux acts on them at all.
 func (h *ClaudeHarness) HasNotificationSupport() bool {
-	return true
+	return h.notificationsEnabled
 }
 
 // HasSandboxPathGrants reports that Claude Code needs extra sandbox path
