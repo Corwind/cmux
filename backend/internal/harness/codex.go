@@ -19,14 +19,18 @@ const CodexType Type = "codex"
 
 // CodexHarness implements Harness for the Codex CLI.
 type CodexHarness struct {
-	model     string
-	codexHome string
+	model                string
+	codexHome            string
+	notificationsEnabled bool
 }
 
 // NewCodexHarness constructs a CodexHarness configured with the model and
 // codex home directory from cfg. If cfg.Home is empty, it defaults to
 // $HOME/.codex (best-effort; degrades to an empty string if the home
-// directory cannot be determined, rather than panicking).
+// directory cannot be determined, rather than panicking). cfg.NotificationsEnabled
+// is expected to already be the effective value (root NotificationConfig.Enabled
+// AND this harness's own setting) — CodexHarness itself doesn't know about
+// the root switch.
 func NewCodexHarness(cfg domain.CodexConfig) *CodexHarness {
 	codexHome := cfg.Home
 	if codexHome == "" {
@@ -35,7 +39,7 @@ func NewCodexHarness(cfg domain.CodexConfig) *CodexHarness {
 			codexHome = filepath.Join(homeDir, ".codex")
 		}
 	}
-	return &CodexHarness{model: cfg.Model, codexHome: codexHome}
+	return &CodexHarness{model: cfg.Model, codexHome: codexHome, notificationsEnabled: cfg.NotificationsEnabled}
 }
 
 // Type returns CodexType.
@@ -64,10 +68,13 @@ func (h *CodexHarness) HasModelSelection() bool {
 	return true
 }
 
-// HasNotificationSupport reports that Codex emits parseable notification
-// sequences.
+// HasNotificationSupport reports whether Codex notifications are enabled
+// for this harness instance (see NewCodexHarness) — Codex is always
+// technically capable of emitting parseable notification sequences, but
+// this gates whether cmux acts on them (and asks Codex to emit them at
+// all — see BuildSpawnArgs) in the first place.
 func (h *CodexHarness) HasNotificationSupport() bool {
-	return true
+	return h.notificationsEnabled
 }
 
 // HasSandboxPathGrants reports that Codex needs extra sandbox path grants.
@@ -88,14 +95,18 @@ func (h *CodexHarness) BuildSpawnArgs(intent SpawnIntent) []string {
 	if intent.Resume {
 		args = append(args, "resume", intent.SessionID)
 	}
-	// Only ask Codex to notify on approval-requested — cmux's own dispatch
-	// (websocket_handler.go) also filters to attention-needed events only,
-	// but there's no reason to have Codex emit and cmux scan OSC 9 pings for
-	// agent-turn-complete when they'd be dropped anyway.
-	args = append(args,
-		"-c", "tui.notification_method=osc9",
-		"-c", `tui.notifications=["approval-requested"]`,
-	)
+	if h.notificationsEnabled {
+		// Only ask Codex to notify on approval-requested — cmux's own
+		// dispatch (websocket_handler.go) also filters to attention-needed
+		// events only, but there's no reason to have Codex emit and cmux
+		// scan OSC 9 pings for agent-turn-complete when they'd be dropped
+		// anyway. When notifications are disabled entirely, skip asking for
+		// any of it.
+		args = append(args,
+			"-c", "tui.notification_method=osc9",
+			"-c", `tui.notifications=["approval-requested"]`,
+		)
+	}
 	if intent.SkipPermissions {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}

@@ -48,12 +48,21 @@ func main() {
 	envCache := configadapter.NewEnvCache(func() []string {
 		return configadapter.ResolveShellEnv(cfg)
 	}, 5*time.Minute)
+	// A harness's own NotificationsEnabled setting only takes effect when the
+	// root switch is also on — AND them here so each harness constructor
+	// (and its HasNotificationSupport) only ever sees the final, effective
+	// value and doesn't need to know about the root config at all.
+	claudeCfg := cfg.Claude
+	claudeCfg.NotificationsEnabled = cfg.Notifications.Enabled && cfg.Claude.NotificationsEnabled
+	codexCfg := cfg.Codex
+	codexCfg.NotificationsEnabled = cfg.Notifications.Enabled && cfg.Codex.NotificationsEnabled
+
 	implemented := map[harness.Type]struct {
 		harness     harness.Harness
 		sectionName string
 	}{
-		harness.ClaudeType: {harness.NewClaudeHarness(cfg.Claude), cfg.Claude.SectionName},
-		harness.CodexType:  {harness.NewCodexHarness(cfg.Codex), cfg.Codex.SectionName},
+		harness.ClaudeType: {harness.NewClaudeHarness(claudeCfg), cfg.Claude.SectionName},
+		harness.CodexType:  {harness.NewCodexHarness(codexCfg), cfg.Codex.SectionName},
 	}
 
 	registry := harness.NewRegistry()

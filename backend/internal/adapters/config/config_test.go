@@ -8,7 +8,7 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	// Unset all env vars that could affect the result
-	for _, key := range []string{"CMUX_CONFIG_PATH", "CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL"} {
+	for _, key := range []string{"CMUX_CONFIG_PATH", "CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL", "CMUX_NOTIFICATIONS_ENABLED", "CMUX_CLAUDE_NOTIFICATIONS_ENABLED", "CMUX_CODEX_NOTIFICATIONS_ENABLED"} {
 		t.Setenv(key, "")
 	}
 	// Point config path to a non-existent file so no TOML is loaded
@@ -231,7 +231,7 @@ port = "4000"
 		t.Fatalf("write config file: %v", err)
 	}
 
-	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL"} {
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL", "CMUX_NOTIFICATIONS_ENABLED", "CMUX_CLAUDE_NOTIFICATIONS_ENABLED", "CMUX_CODEX_NOTIFICATIONS_ENABLED"} {
 		t.Setenv(key, "")
 	}
 	t.Setenv("CMUX_CONFIG_PATH", configFile)
@@ -259,6 +259,15 @@ port = "4000"
 	}
 	if cfg.Codex.Home != "" {
 		t.Errorf("expected empty codex home by default, got %q", cfg.Codex.Home)
+	}
+	if !cfg.Notifications.Enabled {
+		t.Error("expected notifications enabled by default")
+	}
+	if !cfg.Claude.NotificationsEnabled {
+		t.Error("expected claude notifications enabled by default")
+	}
+	if !cfg.Codex.NotificationsEnabled {
+		t.Error("expected codex notifications enabled by default")
 	}
 }
 
@@ -350,6 +359,15 @@ func TestLoadHarnessesDefaults(t *testing.T) {
 	}
 	if cfg.Codex.SectionName != "Codex" {
 		t.Errorf("expected default codex section_name 'Codex', got %q", cfg.Codex.SectionName)
+	}
+	if !cfg.Notifications.Enabled {
+		t.Error("expected notifications enabled by default")
+	}
+	if !cfg.Claude.NotificationsEnabled {
+		t.Error("expected claude notifications enabled by default")
+	}
+	if !cfg.Codex.NotificationsEnabled {
+		t.Error("expected codex notifications enabled by default")
 	}
 }
 
@@ -534,5 +552,141 @@ home = "/tmp/custom-codex-home"
 
 	if cfg.Codex.Home != "/tmp/custom-codex-home" {
 		t.Errorf("expected codex home '/tmp/custom-codex-home', got %q", cfg.Codex.Home)
+	}
+}
+
+func TestLoadNotificationsDisabledFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[notifications]
+enabled = false
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_NOTIFICATIONS_ENABLED", "")
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Notifications.Enabled {
+		t.Error("expected notifications disabled via TOML")
+	}
+	// Per-harness defaults are untouched — the root switch composes with
+	// them at harness-construction time, not by mutating these.
+	if !cfg.Claude.NotificationsEnabled {
+		t.Error("expected claude notifications_enabled to keep its own default of true")
+	}
+}
+
+func TestLoadNotificationsEnabledFromEnvVar(t *testing.T) {
+	t.Setenv("CMUX_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.toml"))
+	t.Setenv("CMUX_NOTIFICATIONS_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Notifications.Enabled {
+		t.Error("expected notifications disabled via CMUX_NOTIFICATIONS_ENABLED=false")
+	}
+}
+
+func TestLoadNotificationsTOMLOverridesEnvVar(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[notifications]
+enabled = true
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_NOTIFICATIONS_ENABLED", "false")
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if !cfg.Notifications.Enabled {
+		t.Error("expected TOML enabled=true to override env var CMUX_NOTIFICATIONS_ENABLED=false")
+	}
+}
+
+func TestLoadClaudeNotificationsDisabledFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[claude]
+notifications_enabled = false
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CLAUDE_NOTIFICATIONS_ENABLED", "")
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Claude.NotificationsEnabled {
+		t.Error("expected claude notifications disabled via TOML")
+	}
+	if !cfg.Notifications.Enabled {
+		t.Error("expected root notifications.enabled to keep its default of true")
+	}
+}
+
+func TestLoadCodexNotificationsDisabledFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[codex]
+notifications_enabled = false
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CODEX_NOTIFICATIONS_ENABLED", "")
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Codex.NotificationsEnabled {
+		t.Error("expected codex notifications disabled via TOML")
+	}
+}
+
+func TestLoadCodexNotificationsEnabledFromEnvVar(t *testing.T) {
+	t.Setenv("CMUX_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.toml"))
+	t.Setenv("CMUX_CODEX_NOTIFICATIONS_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Codex.NotificationsEnabled {
+		t.Error("expected codex notifications disabled via CMUX_CODEX_NOTIFICATIONS_ENABLED=false")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -11,25 +12,37 @@ import (
 )
 
 type tomlConfig struct {
-	Server    tomlServer        `toml:"server"`
-	Sandbox   tomlSandbox       `toml:"sandbox"`
-	Shell     tomlShell         `toml:"shell"`
-	Git       tomlGit           `toml:"git"`
-	Claude    tomlClaude        `toml:"claude"`
-	Codex     tomlCodex         `toml:"codex"`
-	Env       map[string]string `toml:"env"`
-	Harnesses []string          `toml:"harnesses"`
+	Server        tomlServer        `toml:"server"`
+	Sandbox       tomlSandbox       `toml:"sandbox"`
+	Shell         tomlShell         `toml:"shell"`
+	Git           tomlGit           `toml:"git"`
+	Claude        tomlClaude        `toml:"claude"`
+	Codex         tomlCodex         `toml:"codex"`
+	Notifications tomlNotifications `toml:"notifications"`
+	Env           map[string]string `toml:"env"`
+	Harnesses     []string          `toml:"harnesses"`
 }
 
 type tomlClaude struct {
 	Model       string `toml:"model"`
 	SectionName string `toml:"section_name"`
+	// Pointer so an explicit `notifications_enabled = false` in the file is
+	// distinguishable from the key being absent — a plain bool can't tell
+	// "unset" from "false", and the override pattern below needs to know.
+	NotificationsEnabled *bool `toml:"notifications_enabled"`
 }
 
 type tomlCodex struct {
 	Model       string `toml:"model"`
 	SectionName string `toml:"section_name"`
 	Home        string `toml:"home"`
+	// See tomlClaude.NotificationsEnabled for why this is a pointer.
+	NotificationsEnabled *bool `toml:"notifications_enabled"`
+}
+
+type tomlNotifications struct {
+	// See tomlClaude.NotificationsEnabled for why this is a pointer.
+	Enabled *bool `toml:"enabled"`
 }
 
 type tomlGit struct {
@@ -93,13 +106,33 @@ func defaults() domain.Config {
 			WorktreesDir: "~/.cmux/worktrees",
 		},
 		Claude: domain.ClaudeConfig{
-			SectionName: "Claude Code",
+			SectionName:          "Claude Code",
+			NotificationsEnabled: true,
 		},
 		Codex: domain.CodexConfig{
-			SectionName: "Codex",
+			SectionName:          "Codex",
+			NotificationsEnabled: true,
+		},
+		Notifications: domain.NotificationConfig{
+			Enabled: true,
 		},
 		Harnesses: []string{"claude"},
 	}
+}
+
+// applyBoolEnvVar sets *target from the named env var if it's set and parses
+// as a bool (accepting strconv.ParseBool's usual forms: "true"/"false",
+// "1"/"0", etc.); a missing or unparsable value leaves *target untouched.
+func applyBoolEnvVar(name string, target *bool) {
+	v := os.Getenv(name)
+	if v == "" {
+		return
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return
+	}
+	*target = b
 }
 
 func applyEnvVars(cfg *domain.Config) {
@@ -115,6 +148,9 @@ func applyEnvVars(cfg *domain.Config) {
 	if v := os.Getenv("CMUX_SANDBOX_TEMPLATES"); v != "" {
 		cfg.Sandbox.Templates = strings.Split(v, ",")
 	}
+	applyBoolEnvVar("CMUX_NOTIFICATIONS_ENABLED", &cfg.Notifications.Enabled)
+	applyBoolEnvVar("CMUX_CLAUDE_NOTIFICATIONS_ENABLED", &cfg.Claude.NotificationsEnabled)
+	applyBoolEnvVar("CMUX_CODEX_NOTIFICATIONS_ENABLED", &cfg.Codex.NotificationsEnabled)
 	if v := os.Getenv("CMUX_CLAUDE_MODEL"); v != "" {
 		cfg.Claude.Model = v
 	}
@@ -168,6 +204,9 @@ func loadFile(path string, cfg *domain.Config) error {
 	if tc.Claude.SectionName != "" {
 		cfg.Claude.SectionName = tc.Claude.SectionName
 	}
+	if tc.Claude.NotificationsEnabled != nil {
+		cfg.Claude.NotificationsEnabled = *tc.Claude.NotificationsEnabled
+	}
 	if tc.Codex.Model != "" {
 		cfg.Codex.Model = tc.Codex.Model
 	}
@@ -176,6 +215,12 @@ func loadFile(path string, cfg *domain.Config) error {
 	}
 	if tc.Codex.Home != "" {
 		cfg.Codex.Home = tc.Codex.Home
+	}
+	if tc.Codex.NotificationsEnabled != nil {
+		cfg.Codex.NotificationsEnabled = *tc.Codex.NotificationsEnabled
+	}
+	if tc.Notifications.Enabled != nil {
+		cfg.Notifications.Enabled = *tc.Notifications.Enabled
 	}
 	if len(tc.Harnesses) > 0 {
 		cfg.Harnesses = tc.Harnesses
