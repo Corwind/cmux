@@ -29,6 +29,18 @@ func (b *ptyBridge) setConn(conn *websocket.Conn) {
 	b.conn = conn
 }
 
+// clearConn removes conn only if it is still the active browser connection.
+// A stale handler can finish after a reconnect has already installed a newer
+// connection; clearing unconditionally would detach that replacement and make
+// the frontend enter another reconnect cycle.
+func (b *ptyBridge) clearConn(conn *websocket.Conn) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn == conn {
+		b.conn = nil
+	}
+}
+
 func (b *ptyBridge) getConn() *websocket.Conn {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -90,6 +102,8 @@ type resizeMessage struct {
 	Rows uint16 `json:"rows"`
 	Cols uint16 `json:"cols"`
 }
+
+const ptyWebSocketWriteTimeout = 5 * time.Second
 
 // resolveSessionHarness returns the Harness registered for sessionID's
 // HarnessType, falling back to the registry's Default() when the session
@@ -174,8 +188,15 @@ func (h *WebSocketHandler) getBridge(sessionID string, handle *ports.PTYHandle) 
 			}
 
 			if conn := bridge.getConn(); conn != nil {
-				if err := conn.Write(context.Background(), websocket.MessageBinary, data); err != nil {
-					slog.Error("websocket write error", "err", err)
+				writeCtx, cancel := context.WithTimeout(context.Background(), ptyWebSocketWriteTimeout)
+				err := conn.Write(writeCtx, websocket.MessageBinary, data)
+				cancel()
+				if err != nil {
+					// Stop retrying the same dead socket for every PTY chunk. Closing it
+					// also wakes Handle's read loop and lets the browser reconnect.
+					bridge.clearConn(conn)
+					_ = conn.CloseNow()
+					slog.Warn("detached terminal websocket after write failure", "session_id", sessionID, "err", err)
 				}
 			}
 		}
@@ -216,7 +237,7 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	for {
 		msgType, data, err := conn.Read(ctx)
 		if err != nil {
-			bridge.setConn(nil)
+			bridge.clearConn(conn)
 			return
 		}
 
