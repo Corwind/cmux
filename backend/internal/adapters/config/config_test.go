@@ -8,7 +8,7 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	// Unset all env vars that could affect the result
-	for _, key := range []string{"CMUX_CONFIG_PATH", "CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL", "CMUX_NOTIFICATIONS_ENABLED", "CMUX_CLAUDE_NOTIFICATIONS_ENABLED", "CMUX_CODEX_NOTIFICATIONS_ENABLED"} {
+	for _, key := range []string{"CMUX_CONFIG_PATH", "CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL", "CMUX_PI_MODEL", "CMUX_NOTIFICATIONS_ENABLED", "CMUX_CLAUDE_NOTIFICATIONS_ENABLED", "CMUX_CODEX_NOTIFICATIONS_ENABLED"} {
 		t.Setenv(key, "")
 	}
 	// Point config path to a non-existent file so no TOML is loaded
@@ -231,7 +231,7 @@ port = "4000"
 		t.Fatalf("write config file: %v", err)
 	}
 
-	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL", "CMUX_NOTIFICATIONS_ENABLED", "CMUX_CLAUDE_NOTIFICATIONS_ENABLED", "CMUX_CODEX_NOTIFICATIONS_ENABLED"} {
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_CLAUDE_MODEL", "CMUX_CODEX_MODEL", "CMUX_PI_MODEL", "CMUX_NOTIFICATIONS_ENABLED", "CMUX_CLAUDE_NOTIFICATIONS_ENABLED", "CMUX_CODEX_NOTIFICATIONS_ENABLED"} {
 		t.Setenv(key, "")
 	}
 	t.Setenv("CMUX_CONFIG_PATH", configFile)
@@ -259,6 +259,12 @@ port = "4000"
 	}
 	if cfg.Codex.Home != "" {
 		t.Errorf("expected empty codex home by default, got %q", cfg.Codex.Home)
+	}
+	if cfg.Pi.Model != "" {
+		t.Errorf("expected empty pi model by default, got %q", cfg.Pi.Model)
+	}
+	if cfg.Pi.Home != "" {
+		t.Errorf("expected empty pi home by default, got %q", cfg.Pi.Home)
 	}
 	if !cfg.Notifications.Enabled {
 		t.Error("expected notifications enabled by default")
@@ -359,6 +365,9 @@ func TestLoadHarnessesDefaults(t *testing.T) {
 	}
 	if cfg.Codex.SectionName != "Codex" {
 		t.Errorf("expected default codex section_name 'Codex', got %q", cfg.Codex.SectionName)
+	}
+	if cfg.Pi.SectionName != "Pi" {
+		t.Errorf("expected default pi section_name 'Pi', got %q", cfg.Pi.SectionName)
 	}
 	if !cfg.Notifications.Enabled {
 		t.Error("expected notifications enabled by default")
@@ -552,6 +561,130 @@ home = "/tmp/custom-codex-home"
 
 	if cfg.Codex.Home != "/tmp/custom-codex-home" {
 		t.Errorf("expected codex home '/tmp/custom-codex-home', got %q", cfg.Codex.Home)
+	}
+}
+
+func TestLoadPiModelFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[pi]
+model = "anthropic/claude-sonnet-5"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES", "CMUX_PI_MODEL"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Pi.Model != "anthropic/claude-sonnet-5" {
+		t.Errorf("expected pi model 'anthropic/claude-sonnet-5', got %q", cfg.Pi.Model)
+	}
+}
+
+func TestLoadPiModelFromEnvVar(t *testing.T) {
+	t.Setenv("CMUX_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent.toml"))
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("CMUX_PI_MODEL", "openai/gpt-5")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Pi.Model != "openai/gpt-5" {
+		t.Errorf("expected pi model 'openai/gpt-5', got %q", cfg.Pi.Model)
+	}
+}
+
+func TestLoadPiModelTOMLOverridesEnvVar(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[pi]
+model = "anthropic/claude-sonnet-5"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_PI_MODEL", "openai/gpt-5")
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+	for _, key := range []string{"CMUX_PORT", "CMUX_DB_PATH", "CMUX_SANDBOX_TEMPLATE_DIR", "CMUX_SANDBOX_TEMPLATES"} {
+		t.Setenv(key, "")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Pi.Model != "anthropic/claude-sonnet-5" {
+		t.Errorf("expected TOML pi model 'anthropic/claude-sonnet-5' to override env var, got %q", cfg.Pi.Model)
+	}
+}
+
+func TestLoadPiSectionNameOverridesDefault(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[pi]
+section_name = "My Pi"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Pi.SectionName != "My Pi" {
+		t.Errorf("expected pi section_name 'My Pi', got %q", cfg.Pi.SectionName)
+	}
+	// harnesses should still default since not set in TOML
+	if len(cfg.Harnesses) != 1 || cfg.Harnesses[0] != "claude" {
+		t.Errorf("expected default harnesses ['claude'], got %v", cfg.Harnesses)
+	}
+}
+
+func TestLoadPiHomeFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.toml")
+
+	tomlContent := `
+[pi]
+home = "/tmp/custom-pi-home"
+`
+	if err := os.WriteFile(configFile, []byte(tomlContent), 0644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	t.Setenv("CMUX_CONFIG_PATH", configFile)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Pi.Home != "/tmp/custom-pi-home" {
+		t.Errorf("expected pi home '/tmp/custom-pi-home', got %q", cfg.Pi.Home)
 	}
 }
 

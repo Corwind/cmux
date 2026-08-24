@@ -18,6 +18,7 @@ type tomlConfig struct {
 	Git           tomlGit           `toml:"git"`
 	Claude        tomlClaude        `toml:"claude"`
 	Codex         tomlCodex         `toml:"codex"`
+	Pi            tomlPi            `toml:"pi"`
 	Notifications tomlNotifications `toml:"notifications"`
 	Env           map[string]string `toml:"env"`
 	Harnesses     []string          `toml:"harnesses"`
@@ -38,6 +39,12 @@ type tomlCodex struct {
 	Home        string `toml:"home"`
 	// See tomlClaude.NotificationsEnabled for why this is a pointer.
 	NotificationsEnabled *bool `toml:"notifications_enabled"`
+}
+
+type tomlPi struct {
+	Model       string `toml:"model"`
+	SectionName string `toml:"section_name"`
+	Home        string `toml:"home"`
 }
 
 type tomlNotifications struct {
@@ -113,6 +120,9 @@ func defaults() domain.Config {
 			SectionName:          "Codex",
 			NotificationsEnabled: true,
 		},
+		Pi: domain.PiConfig{
+			SectionName: "Pi",
+		},
 		Notifications: domain.NotificationConfig{
 			Enabled: true,
 		},
@@ -156,6 +166,9 @@ func applyEnvVars(cfg *domain.Config) {
 	}
 	if v := os.Getenv("CMUX_CODEX_MODEL"); v != "" {
 		cfg.Codex.Model = v
+	}
+	if v := os.Getenv("CMUX_PI_MODEL"); v != "" {
+		cfg.Pi.Model = v
 	}
 }
 
@@ -218,6 +231,15 @@ func loadFile(path string, cfg *domain.Config) error {
 	}
 	if tc.Codex.NotificationsEnabled != nil {
 		cfg.Codex.NotificationsEnabled = *tc.Codex.NotificationsEnabled
+	}
+	if tc.Pi.Model != "" {
+		cfg.Pi.Model = tc.Pi.Model
+	}
+	if tc.Pi.SectionName != "" {
+		cfg.Pi.SectionName = tc.Pi.SectionName
+	}
+	if tc.Pi.Home != "" {
+		cfg.Pi.Home = tc.Pi.Home
 	}
 	if tc.Notifications.Enabled != nil {
 		cfg.Notifications.Enabled = *tc.Notifications.Enabled
