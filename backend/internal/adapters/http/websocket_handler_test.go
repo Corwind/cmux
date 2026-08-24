@@ -143,6 +143,25 @@ func TestShouldNotify_OnlyWaitingInput(t *testing.T) {
 	}
 }
 
+func TestPTYBridgeStaleConnectionCannotClearReplacement(t *testing.T) {
+	bridge := &ptyBridge{}
+	first := &websocket.Conn{}
+	replacement := &websocket.Conn{}
+
+	bridge.setConn(first)
+	bridge.setConn(replacement)
+	bridge.clearConn(first)
+
+	if got := bridge.getConn(); got != replacement {
+		t.Fatalf("stale connection cleared replacement: got %p, want %p", got, replacement)
+	}
+
+	bridge.clearConn(replacement)
+	if got := bridge.getConn(); got != nil {
+		t.Fatalf("active connection was not cleared: got %p", got)
+	}
+}
+
 func TestWebSocketProcessExit(t *testing.T) {
 	server, service := setupTestServer(t)
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Terminal as XTerm } from "@xterm/xterm";
+import { Terminal as XTerm, type IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
@@ -53,16 +53,39 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     let term: XTerm | null = null;
     let ws: WebSocket | null = null;
     let resizeObserver: ResizeObserver | null = null;
+    let dataDisposable: IDisposable | null = null;
+    let terminalResizeDisposable: IDisposable | null = null;
+    let onKeyDown: ((event: KeyboardEvent) => void) | null = null;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let alive = true;
     let intentionalClose = false;
+    let lastResizeSocket: WebSocket | null = null;
+    let lastResizeRows = 0;
+    let lastResizeCols = 0;
 
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl =
-      wsBaseUrl ?? `${wsProtocol}//${window.location.host}/ws/sessions/${sessionId}`;
+      wsBaseUrl ??
+      `${wsProtocol}//${window.location.host}/ws/sessions/${sessionId}`;
 
-    function connectWs(currentTerm: XTerm, fitAddon: FitAddon, encoder: TextEncoder) {
+    function sendResize(rows: number, cols: number) {
+      const currentWs = ws;
+      if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+      if (
+        currentWs === lastResizeSocket &&
+        rows === lastResizeRows &&
+        cols === lastResizeCols
+      ) {
+        return;
+      }
+      lastResizeSocket = currentWs;
+      lastResizeRows = rows;
+      lastResizeCols = cols;
+      currentWs.send(JSON.stringify({ type: "resize", rows, cols }));
+    }
+
+    function connectWs(currentTerm: XTerm, fitAddon: FitAddon) {
       if (!alive) return;
 
       ws = new WebSocket(wsUrl);
@@ -70,18 +93,19 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       const currentWs = ws;
 
       currentWs.onopen = () => {
-        if (!alive) return;
+        if (!alive || ws !== currentWs) return;
         fitAddon.fit();
-        currentWs.send(JSON.stringify({ type: "resize", rows: currentTerm.rows, cols: currentTerm.cols }));
+        sendResize(currentTerm.rows, currentTerm.cols);
       };
 
       currentWs.onmessage = (event: MessageEvent) => {
-        if (!alive || !currentTerm) return;
+        if (!alive || ws !== currentWs) return;
         if (event.data instanceof ArrayBuffer) {
           currentTerm.write(new Uint8Array(event.data));
         } else if (event.data instanceof Blob) {
           event.data.arrayBuffer().then((buf) => {
-            if (alive && currentTerm) currentTerm.write(new Uint8Array(buf));
+            if (alive && ws === currentWs)
+              currentTerm.write(new Uint8Array(buf));
           });
         } else {
           currentTerm.write(event.data as string);
@@ -89,21 +113,12 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       };
 
       currentWs.onclose = () => {
-        if (!alive || intentionalClose) return;
-        reconnectTimer = setTimeout(() => connectWs(currentTerm, fitAddon, encoder), 1000);
+        if (!alive || intentionalClose || ws !== currentWs) return;
+        reconnectTimer = setTimeout(
+          () => connectWs(currentTerm, fitAddon),
+          1000,
+        );
       };
-
-      currentTerm.onData((data) => {
-        if (currentWs.readyState === WebSocket.OPEN) {
-          currentWs.send(encoder.encode(data));
-        }
-      });
-
-      currentTerm.onResize(({ rows, cols }) => {
-        if (currentWs.readyState === WebSocket.OPEN) {
-          currentWs.send(JSON.stringify({ type: "resize", rows, cols }));
-        }
-      });
     }
 
     function doMount() {
@@ -113,7 +128,9 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         return;
       }
 
-      const { theme } = getTerminalTheme(useTerminalThemeStore.getState().themeId);
+      const { theme } = getTerminalTheme(
+        useTerminalThemeStore.getState().themeId,
+      );
       const currentFontFamily = useTerminalThemeStore.getState().fontFamily;
 
       term = new XTerm({
@@ -149,6 +166,19 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       const currentTerm = term;
       const encoder = new TextEncoder();
 
+      // These listeners belong to the terminal, not to an individual socket.
+      // Keeping them outside connectWs prevents one extra pair from accumulating
+      // after every reconnect and lets them always target the latest socket.
+      dataDisposable = currentTerm.onData((data) => {
+        const currentWs = ws;
+        if (currentWs?.readyState === WebSocket.OPEN) {
+          currentWs.send(encoder.encode(data));
+        }
+      });
+      terminalResizeDisposable = currentTerm.onResize(({ rows, cols }) => {
+        sendResize(rows, cols);
+      });
+
       // Respond to kitty keyboard protocol queries from Claude Code.
       // When Claude Code starts, it queries/enables the kitty protocol via CSI sequences.
       // xterm.js doesn't support it natively, so we intercept and respond manually.
@@ -164,10 +194,13 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       });
 
       // Handle CSI > flags u — kitty protocol push (Claude Code enables the protocol)
-      currentTerm.parser.registerCsiHandler({ prefix: ">", final: "u" }, (params) => {
-        kittyModeFlags = (params[0] as number) ?? 1;
-        return false;
-      });
+      currentTerm.parser.registerCsiHandler(
+        { prefix: ">", final: "u" },
+        (params) => {
+          kittyModeFlags = (params[0] as number) ?? 1;
+          return false;
+        },
+      );
 
       // Handle CSI < u — kitty protocol pop
       currentTerm.parser.registerCsiHandler({ prefix: "<", final: "u" }, () => {
@@ -177,7 +210,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
 
       // Intercept Shift+Enter at the DOM level (capture phase) to fully prevent
       // xterm.js from also sending \r. Send kitty protocol escape sequence instead.
-      const onKeyDown = (event: KeyboardEvent) => {
+      onKeyDown = (event: KeyboardEvent) => {
         if (event.key === "Enter" && event.shiftKey) {
           event.preventDefault();
           event.stopPropagation();
@@ -188,7 +221,7 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       };
       container.addEventListener("keydown", onKeyDown, true);
 
-      connectWs(currentTerm, fitAddon, encoder);
+      connectWs(currentTerm, fitAddon);
 
       resizeObserver = new ResizeObserver(() => {
         clearTimeout(resizeTimer);
@@ -200,11 +233,17 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     doMount();
 
     const cleanup = () => {
+      if (!alive) return;
       alive = false;
       intentionalClose = true;
       clearTimeout(resizeTimer);
       clearTimeout(reconnectTimer);
       resizeObserver?.disconnect();
+      dataDisposable?.dispose();
+      terminalResizeDisposable?.dispose();
+      if (onKeyDown) {
+        container.removeEventListener("keydown", onKeyDown, true);
+      }
       if (ws && ws.readyState <= WebSocket.OPEN) {
         ws.close();
       }
@@ -213,9 +252,6 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       term = null;
       ws = null;
     };
-
-    // Note: container event listeners are cleaned up when term.dispose()
-    // removes the terminal DOM elements, and when the container is unmounted.
 
     cleanupRef.current = cleanup;
 
