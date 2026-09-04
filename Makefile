@@ -63,9 +63,9 @@ uninstall-service:
 	@echo "cmux service uninstalled"
 
 restart-service: build
-	cp backend/bin/cmux $(BIN_DEST)
 	-launchctl bootout $(SERVICE_TARGET) 2>/dev/null
 	@while launchctl print $(SERVICE_TARGET) >/dev/null 2>&1; do sleep 0.2; done
+	cp backend/bin/cmux $(BIN_DEST)
 	launchctl bootstrap gui/$(shell id -u) $(PLIST_DEST)
 	@echo "cmux service restarted"
 
