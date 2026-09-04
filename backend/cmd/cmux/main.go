@@ -63,6 +63,7 @@ func main() {
 	}{
 		harness.ClaudeType: {harness.NewClaudeHarness(claudeCfg), cfg.Claude.SectionName},
 		harness.CodexType:  {harness.NewCodexHarness(codexCfg), cfg.Codex.SectionName},
+		harness.PiType:     {harness.NewPiHarness(cfg.Pi), cfg.Pi.SectionName},
 	}
 
 	registry := harness.NewRegistry()
