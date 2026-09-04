@@ -105,6 +105,36 @@ type resizeMessage struct {
 
 const ptyWebSocketWriteTimeout = 5 * time.Second
 
+// pingInterval and pingTimeout detect browser connections that die silently
+// (sleep/wake, flaky wifi, NAT timeout) on otherwise-quiet sessions, where no
+// PTY output would ever trigger a write and surface the dead socket.
+const (
+	pingInterval = 30 * time.Second
+	pingTimeout  = 10 * time.Second
+)
+
+// keepAlive periodically pings conn until ctx is done or a ping fails, then
+// closes conn so Handle's blocking read loop wakes up and the browser can
+// reconnect.
+func keepAlive(ctx context.Context, conn *websocket.Conn) {
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
+			err := conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				_ = conn.CloseNow()
+				return
+			}
+		}
+	}
+}
+
 // resolveSessionHarness returns the Harness registered for sessionID's
 // HarnessType, falling back to the registry's Default() when the session
 // can't be looked up or its type isn't registered. Returns nil if no registry
@@ -231,6 +261,7 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	bridge.setConn(conn)
 
 	ctx := r.Context()
+	go keepAlive(ctx, conn)
 	firstResize := true
 
 	// WebSocket -> PTY (reads from browser, writes to PTY)
@@ -253,7 +284,6 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if msg.Type == "resize" {
-				session, _ := h.service.GetSession(ctx, sessionID)
 				if firstResize {
 					// On first resize (reconnect), nudge the size to force a full redraw.
 					// Small delay ensures the bridge goroutine is ready to write.
@@ -262,12 +292,12 @@ func (h *WebSocketHandler) Handle(w http.ResponseWriter, r *http.Request) {
 					firstResize = false
 					go func() {
 						time.Sleep(100 * time.Millisecond)
-						_ = h.service.ResizePTY(session.PID, msg.Rows, msg.Cols-1)
+						_ = h.service.ResizePTY(handle.PID, msg.Rows, msg.Cols-1)
 						time.Sleep(50 * time.Millisecond)
-						_ = h.service.ResizePTY(session.PID, msg.Rows, msg.Cols)
+						_ = h.service.ResizePTY(handle.PID, msg.Rows, msg.Cols)
 					}()
 				} else {
-					_ = h.service.ResizePTY(session.PID, msg.Rows, msg.Cols)
+					_ = h.service.ResizePTY(handle.PID, msg.Rows, msg.Cols)
 				}
 			}
 		}
