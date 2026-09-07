@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Corwind/cmux/backend/internal/domain"
+	"github.com/Corwind/cmux/backend/internal/harness"
 	"github.com/Corwind/cmux/backend/internal/ports"
 )
 
@@ -242,6 +243,88 @@ func TestCreateSession_WithWorktree_AdoptsExistingRecord(t *testing.T) {
 	}
 	if wt.SessionID == nil || *wt.SessionID != session.ID {
 		t.Errorf("expected session linked to existing worktree via SessionID, got %v", wt.SessionID)
+	}
+}
+
+func TestCreateSession_FromOrphanedWorktree_RelinksWithDifferentHarness(t *testing.T) {
+	repo := newMockRepo()
+	pm := newMockProcessManager()
+	wtr := newMockWorktreeRepo()
+	ctx := context.Background()
+
+	oldSession := domain.Session{
+		ID:              "old-claude-session",
+		Name:            "old",
+		WorkingDir:      "/tmp/worktrees/repo/feature-wt",
+		Status:          domain.StatusStopped,
+		RepoRoot:        "/repo",
+		GitBranch:       "feature/wt",
+		WorktreeManaged: true,
+		HarnessType:     string(harness.ClaudeType),
+	}
+	if err := repo.Create(ctx, oldSession); err != nil {
+		t.Fatalf("create old session: %v", err)
+	}
+
+	oldSessionID := oldSession.ID
+	existing := domain.ManagedWorktree{
+		ID:        "existing-wt",
+		Path:      oldSession.WorkingDir,
+		Branch:    oldSession.GitBranch,
+		RepoRoot:  oldSession.RepoRoot,
+		SessionID: &oldSessionID,
+		CreatedAt: time.Now(),
+	}
+	if err := wtr.Create(ctx, existing); err != nil {
+		t.Fatalf("create worktree record: %v", err)
+	}
+
+	registry := harness.NewRegistry()
+	registry.Register(harness.NewClaudeHarness(domain.ClaudeConfig{}), "Claude Code")
+	registry.Register(harness.NewCodexHarness(domain.CodexConfig{Home: t.TempDir()}), "Codex")
+	svc := NewSessionService(repo, pm, nil,
+		WithWorktreeRepository(wtr),
+		WithHarnessRegistry(registry),
+		WithDiscoverRetryConfig(1, time.Millisecond),
+	)
+
+	if err := svc.DeleteSession(ctx, oldSession.ID); err != nil {
+		t.Fatalf("delete old session: %v", err)
+	}
+	// The real SQLite foreign key clears this automatically. The in-memory
+	// worktree mock has no cascade, so mirror the post-delete database state.
+	if err := wtr.SetSession(ctx, existing.ID, nil); err != nil {
+		t.Fatalf("clear deleted session link: %v", err)
+	}
+
+	newSession, err := svc.CreateSession(ctx, CreateSessionInput{
+		Name:        "replacement",
+		WorkingDir:  existing.Path,
+		HarnessType: string(harness.CodexType),
+	})
+	if err != nil {
+		t.Fatalf("create replacement session: %v", err)
+	}
+
+	if newSession.HarnessType != string(harness.CodexType) {
+		t.Errorf("expected replacement harness %q, got %q", harness.CodexType, newSession.HarnessType)
+	}
+	if !newSession.WorktreeManaged {
+		t.Error("expected replacement session to adopt managed worktree")
+	}
+	if newSession.RepoRoot != existing.RepoRoot {
+		t.Errorf("expected repo root %q, got %q", existing.RepoRoot, newSession.RepoRoot)
+	}
+	if newSession.GitBranch != existing.Branch {
+		t.Errorf("expected branch %q, got %q", existing.Branch, newSession.GitBranch)
+	}
+
+	linked, err := wtr.Get(ctx, existing.ID)
+	if err != nil {
+		t.Fatalf("get relinked worktree: %v", err)
+	}
+	if linked.SessionID == nil || *linked.SessionID != newSession.ID {
+		t.Errorf("expected worktree linked to replacement session %q, got %v", newSession.ID, linked.SessionID)
 	}
 }
 
