@@ -4,13 +4,23 @@ import { Terminal } from "./Terminal";
 
 type DataListener = (data: string) => void;
 type ResizeListener = (size: { rows: number; cols: number }) => void;
+type LinkHandler = (event: MouseEvent, uri: string) => void;
+type LinkOptions = {
+  hover?: () => void;
+  leave?: () => void;
+};
 
 const xtermState = vi.hoisted(() => ({
   instances: [] as Array<{
     dataListeners: Set<DataListener>;
     resizeListeners: Set<ResizeListener>;
+    options: Record<string, unknown>;
+    element?: HTMLElement;
     emitData(data: string): void;
   }>,
+  linkifierMouseDown: vi.fn(),
+  webLinksHandler: undefined as LinkHandler | undefined,
+  webLinksOptions: undefined as LinkOptions | undefined,
 }));
 
 vi.mock("@xterm/xterm", () => ({
@@ -22,13 +32,22 @@ vi.mock("@xterm/xterm", () => ({
     parser = { registerCsiHandler: vi.fn(() => ({ dispose: vi.fn() })) };
     dataListeners = new Set<DataListener>();
     resizeListeners = new Set<ResizeListener>();
+    element?: HTMLElement;
 
-    constructor() {
+    constructor(options?: Record<string, unknown>) {
+      if (options) this.options = options;
       xtermState.instances.push(this);
     }
 
     loadAddon() {}
-    open() {}
+    open(container: HTMLElement) {
+      this.element = document.createElement("div");
+      const screen = document.createElement("div");
+      screen.className = "xterm-screen";
+      screen.addEventListener("mousedown", xtermState.linkifierMouseDown);
+      this.element.appendChild(screen);
+      container.appendChild(this.element);
+    }
     write() {}
     dispose() {}
 
@@ -53,7 +72,14 @@ vi.mock("@xterm/addon-fit", () => ({
     fit() {}
   },
 }));
-vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }));
+vi.mock("@xterm/addon-web-links", () => ({
+  WebLinksAddon: class {
+    constructor(handler: LinkHandler, options: LinkOptions) {
+      xtermState.webLinksHandler = handler;
+      xtermState.webLinksOptions = options;
+    }
+  },
+}));
 vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: class {} }));
 vi.mock("@xterm/addon-webgl", () => ({
   WebglAddon: class MockWebglAddon {
@@ -106,6 +132,9 @@ describe("Terminal WebSocket lifecycle", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     xtermState.instances.length = 0;
+    xtermState.linkifierMouseDown.mockClear();
+    xtermState.webLinksHandler = undefined;
+    xtermState.webLinksOptions = undefined;
     MockWebSocket.instances.length = 0;
     vi.stubGlobal("WebSocket", MockWebSocket);
     vi.stubGlobal("ResizeObserver", MockResizeObserver);
@@ -150,5 +179,66 @@ describe("Terminal WebSocket lifecycle", () => {
     unmount();
     expect(terminal.dataListeners).toHaveLength(0);
     expect(terminal.resizeListeners).toHaveLength(0);
+  });
+
+  it("does not forward a web link click to the terminal mouse protocol", () => {
+    render(
+      <Terminal sessionId="session-1" wsBaseUrl="ws://localhost/session-1" />,
+    );
+
+    const terminal = xtermState.instances[0]!;
+    const screen =
+      terminal.element!.querySelector<HTMLElement>(".xterm-screen")!;
+    const terminalMouseDown = vi.fn();
+    terminal.element!.addEventListener("mousedown", terminalMouseDown);
+
+    xtermState.webLinksOptions!.hover?.();
+    screen.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, button: 0 }),
+    );
+
+    expect(xtermState.linkifierMouseDown).toHaveBeenCalledOnce();
+    expect(terminalMouseDown).not.toHaveBeenCalled();
+  });
+
+  it("does not forward an OSC hyperlink click to the terminal mouse protocol", () => {
+    render(
+      <Terminal sessionId="session-1" wsBaseUrl="ws://localhost/session-1" />,
+    );
+
+    const terminal = xtermState.instances[0]!;
+    const screen =
+      terminal.element!.querySelector<HTMLElement>(".xterm-screen")!;
+    const terminalMouseDown = vi.fn();
+    terminal.element!.addEventListener("mousedown", terminalMouseDown);
+    const linkHandler = terminal.options.linkHandler as LinkOptions & {
+      activate: LinkHandler;
+    };
+
+    linkHandler.hover?.();
+    screen.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, button: 0 }),
+    );
+
+    expect(xtermState.linkifierMouseDown).toHaveBeenCalledOnce();
+    expect(terminalMouseDown).not.toHaveBeenCalled();
+  });
+
+  it("continues forwarding ordinary clicks to the terminal", () => {
+    render(
+      <Terminal sessionId="session-1" wsBaseUrl="ws://localhost/session-1" />,
+    );
+
+    const terminal = xtermState.instances[0]!;
+    const screen =
+      terminal.element!.querySelector<HTMLElement>(".xterm-screen")!;
+    const terminalMouseDown = vi.fn();
+    terminal.element!.addEventListener("mousedown", terminalMouseDown);
+
+    screen.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, button: 0 }),
+    );
+
+    expect(terminalMouseDown).toHaveBeenCalledOnce();
   });
 });
