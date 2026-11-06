@@ -74,7 +74,10 @@ func TestSandboxDeniesFileWriteOutsideWorkDir(t *testing.T) {
 	}()
 
 	select {
-	case <-handle.Done:
+	case err := <-handle.Done:
+		if err != nil {
+			t.Logf("sandboxed process exited with error: %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		_ = m.Kill(handle.PID)
 		t.Fatal("process did not exit in time")
@@ -87,7 +90,7 @@ func TestSandboxDeniesFileWriteOutsideWorkDir(t *testing.T) {
 
 	// Denied file should NOT exist (write outside workdir blocked)
 	if _, err := os.Stat(deniedFile); err == nil {
-		os.Remove(deniedFile)
+		_ = os.Remove(deniedFile)
 		t.Fatal("expected sandbox to deny file write outside working directory")
 	}
 }
@@ -127,7 +130,10 @@ func TestSandboxAllowsFileWriteInWorkDir(t *testing.T) {
 	}()
 
 	select {
-	case <-handle.Done:
+	case err := <-handle.Done:
+		if err != nil {
+			t.Logf("sandboxed process exited with error: %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		_ = m.Kill(handle.PID)
 		t.Fatal("process did not exit in time")
