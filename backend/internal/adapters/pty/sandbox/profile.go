@@ -95,6 +95,9 @@ func buildProfile(templateFragments []string, extraWritePaths []string, pathGran
 	b.WriteString("(allow user-preference-read)\n")
 	// Allow `open https://...` to hand URLs off to the browser via Launch Services
 	b.WriteString("(allow appleevent-send)\n")
+	// Power management queries (sleep/wake state, battery info) go through
+	// IOPMrootDomain; tools in the sandboxed toolchain probe this routinely.
+	b.WriteString(`(allow iokit-open (iokit-user-client-class "RootDomainUserClient"))` + "\n")
 
 	// Network (Claude Code needs to call Anthropic API)
 	b.WriteString("\n;; network\n")

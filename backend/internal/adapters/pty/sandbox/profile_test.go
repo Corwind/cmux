@@ -47,6 +47,7 @@ func TestBuildBasicProfile(t *testing.T) {
 		"(allow network-inbound)",
 		"(allow network-bind)",
 		"(allow system-socket)",
+		`(allow iokit-open (iokit-user-client-class "RootDomainUserClient"))`,
 	}
 
 	for _, frag := range requiredFragments {
