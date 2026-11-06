@@ -15,6 +15,36 @@ interface TerminalProps {
   wsBaseUrl?: string;
 }
 
+function openExternalLink(event: MouseEvent, uri: string) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const newWindow = window.open();
+  if (!newWindow) {
+    console.warn("Opening link blocked as opener could not be cleared");
+    return;
+  }
+
+  try {
+    newWindow.opener = null;
+  } catch {
+    // Electron can throw when clearing the opener.
+  }
+  newWindow.location.href = uri;
+}
+
+function openOscLink(event: MouseEvent, uri: string) {
+  event.preventDefault();
+  event.stopPropagation();
+  if (
+    window.confirm(
+      `Do you want to navigate to ${uri}?\n\nWARNING: This link could potentially be dangerous`,
+    )
+  ) {
+    openExternalLink(event, uri);
+  }
+}
+
 export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -56,6 +86,9 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
     let dataDisposable: IDisposable | null = null;
     let terminalResizeDisposable: IDisposable | null = null;
     let onKeyDown: ((event: KeyboardEvent) => void) | null = null;
+    let linkEventTarget: HTMLElement | null = null;
+    let onLinkMouseEvent: ((event: MouseEvent) => void) | null = null;
+    let pointerOverLink = false;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let alive = true;
@@ -139,17 +172,48 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
         fontFamily: currentFontFamily,
         theme,
         allowProposedApi: true,
+        linkHandler: {
+          activate: openOscLink,
+          hover: () => {
+            pointerOverLink = true;
+          },
+          leave: () => {
+            pointerOverLink = false;
+          },
+        },
       });
 
       termRef.current = term;
 
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
-      term.loadAddon(new WebLinksAddon());
+      term.loadAddon(
+        new WebLinksAddon(openExternalLink, {
+          hover: () => {
+            pointerOverLink = true;
+          },
+          leave: () => {
+            pointerOverLink = false;
+          },
+        }),
+      );
       const unicodeAddon = new Unicode11Addon();
       term.loadAddon(unicodeAddon);
       term.unicode.activeVersion = "11";
       term.open(container);
+
+      // The linkifier listens on .xterm-screen, while terminal mouse reporting
+      // listens on its parent and the document. Stop a link click after the
+      // linkifier sees it so the running TUI cannot open the same URL again.
+      linkEventTarget =
+        term.element?.querySelector<HTMLElement>(".xterm-screen") ?? null;
+      onLinkMouseEvent = (event: MouseEvent) => {
+        if (pointerOverLink && event.button === 0) {
+          event.stopPropagation();
+        }
+      };
+      linkEventTarget?.addEventListener("mousedown", onLinkMouseEvent);
+      linkEventTarget?.addEventListener("mouseup", onLinkMouseEvent);
 
       // WebGL renderer: better glyph positioning and font-fallback accuracy,
       // fixes spacing issues with Powerline/Nerd Font glyphs and symbols like ⎇.
@@ -243,6 +307,10 @@ export function Terminal({ sessionId, wsBaseUrl }: TerminalProps) {
       terminalResizeDisposable?.dispose();
       if (onKeyDown) {
         container.removeEventListener("keydown", onKeyDown, true);
+      }
+      if (linkEventTarget && onLinkMouseEvent) {
+        linkEventTarget.removeEventListener("mousedown", onLinkMouseEvent);
+        linkEventTarget.removeEventListener("mouseup", onLinkMouseEvent);
       }
       if (ws && ws.readyState <= WebSocket.OPEN) {
         ws.close();
