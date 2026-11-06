@@ -166,6 +166,18 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		return domain.Session{}, fmt.Errorf("invalid session: %w", err)
 	}
 
+	// Selecting an existing worktree in the UI intentionally sends only its
+	// path: there is nothing to create, so input.Worktree is nil. Recover the
+	// managed-worktree relationship from the persisted path before saving the
+	// session so its metadata and sidebar link survive a harness switch.
+	if s.worktreeRepo != nil {
+		if wt, getErr := s.worktreeRepo.GetByPath(ctx, workingDir); getErr == nil {
+			session.RepoRoot = wt.RepoRoot
+			session.GitBranch = wt.Branch
+			session.WorktreeManaged = true
+		}
+	}
+
 	// Resolve sandbox template content
 	s.applySandboxContent(ctx, input.TemplateID)
 
@@ -192,6 +204,10 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 			slog.Error("failed to kill process after session persist failure", "pid", handle.PID, "err", killErr)
 		}
 		return domain.Session{}, fmt.Errorf("failed to store session: %w", err)
+	}
+
+	if session.WorktreeManaged && s.worktreeRepo != nil {
+		s.trackWorktreeSession(ctx, session)
 	}
 
 	slog.Info("session created", "session_id", session.ID, "name", session.Name, "pid", session.PID, "working_dir", workingDir)
