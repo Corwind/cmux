@@ -715,7 +715,9 @@ func (s *SessionService) removeWorktree(wt domain.ManagedWorktree, delCtx contex
 }
 
 func (s *SessionService) watchProcess(sessionID string, handle *ports.PTYHandle) {
-	<-handle.Done
+	if err := <-handle.Done; err != nil {
+		slog.Debug("session process exited with error", "session_id", sessionID, "err", err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
